@@ -1,20 +1,22 @@
-// Sound, synthesised live with WebAudio: no audio files, nothing to load.
-// Short noise-and-oscillator recipes for the street's vocabulary — gunshots,
-// impacts, cash, and the little stings that mark a job done or a day ruined.
-// The engine hum, sirens and music arrive in this file's second pass.
+// Every sound in Sunhaven is synthesised on the spot with WebAudio — noise
+// through a filter for the things that bang and scrape, oscillators for the
+// things that ring. No audio files, nothing to fetch. On top of the one-shot
+// recipes sit three loops: the engine under Leo's right foot, the siren that
+// means the SHD is near, and a slow radio pulse that never quite turns off.
 
 export class GameAudio {
   constructor() {
     this.ctx = null;
     this.master = null;
     this.muted = false;
-    this.engine = null;   // { osc, gain } while Leo drives
-    this.siren = null;    // { osc, gain, lfo } while the SHD is close
+    this.engine = null;   // { osc, gain } while Leo is driving
+    this.siren = null;    // { osc, gain, lfo } while officers are close
     this.musicOn = false;
     this.musicStep = 0;
   }
 
-  /** Browsers only allow sound after a gesture; main calls this on input. */
+  /** Browsers refuse sound before a gesture, so main calls this whenever
+   * the player touches a key or the mouse. Safe to call forever after. */
   unlock() {
     if (this.ctx) {
       if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -26,10 +28,11 @@ export class GameAudio {
       this.master.gain.value = 0.5;
       this.master.connect(this.ctx.destination);
     } catch {
-      this.ctx = null;
+      this.ctx = null;   // no audio in this browser: the game goes on quietly
     }
   }
 
+  /** One oscillator note with an exponential fall and an optional slide. */
   tone(freq, dur, type, vol, slideTo) {
     if (!this.ctx || this.muted) return;
     const t = this.ctx.currentTime;
@@ -45,6 +48,8 @@ export class GameAudio {
     osc.stop(t + dur + 0.02);
   }
 
+  /** One burst of filtered noise, shaped like a slap: loud at the front,
+   * gone at the back. */
   noise(dur, vol, freq) {
     if (!this.ctx || this.muted) return;
     const t = this.ctx.currentTime;
@@ -63,6 +68,7 @@ export class GameAudio {
     src.start(t);
   }
 
+  // The street's vocabulary, one recipe each.
   shot() { this.noise(0.14, 0.5, 2600); this.tone(160, 0.1, 'square', 0.18, 60); }
   hit() { this.noise(0.05, 0.22, 4200); this.tone(2200, 0.04, 'square', 0.06, 900); }
   thud() { this.tone(120, 0.22, 'sine', 0.5, 40); this.noise(0.12, 0.25, 500); }
@@ -71,17 +77,20 @@ export class GameAudio {
   cash() { this.tone(880, 0.09, 'sine', 0.22); setTimeout(() => this.tone(1320, 0.14, 'sine', 0.22), 70); }
   pickup() { this.tone(620, 0.07, 'triangle', 0.2, 940); }
   horn() { this.tone(370, 0.16, 'square', 0.1); this.tone(466, 0.16, 'square', 0.08); }
+  /** A car door: a soft thunk with a latch click on top of it. */
+  door() { this.tone(170, 0.09, 'sine', 0.28, 65); this.noise(0.045, 0.12, 1100); }
 
+  /** Four notes, up for a job done and down for a day ruined. */
   sting(good) {
     if (!this.ctx || this.muted) return;
     const notes = good ? [523, 659, 784, 1046] : [392, 330, 262, 196];
     notes.forEach((freq, i) => setTimeout(() => this.tone(freq, 0.22, 'triangle', 0.2), i * 110));
   }
 
-  // --- Loops: engine, siren, and the radio that never quite turns off --------
+  // --- The loops -------------------------------------------------------------
 
-  /** Called every frame by main: engineRatio is 0..1 while driving (else
-   * null), sirenOn while officers are near with the heat up. */
+  /** Called every frame by main: engineRatio runs 0..1 while Leo drives
+   * (null on foot), sirenOn while the heat is up and officers are near. */
   updateLoops(engineRatio, sirenOn) {
     if (!this.ctx) return;
     if (this.muted) {
@@ -97,9 +106,9 @@ export class GameAudio {
   setEngine(ratio) {
     if (ratio === null || ratio === undefined) {
       if (this.engine) {
-        this.engine.gain.gain.value = 0;
         const eng = this.engine;
-        setTimeout(() => { try { eng.osc.stop(); } catch { /* already gone */ } }, 120);
+        eng.gain.gain.value = 0;
+        setTimeout(() => { try { eng.osc.stop(); } catch { /* already stopped */ } }, 120);
         this.engine = null;
       }
       return;
@@ -126,7 +135,7 @@ export class GameAudio {
       if (this.siren) {
         const s = this.siren;
         s.gain.gain.value = 0;
-        setTimeout(() => { try { s.osc.stop(); s.lfo.stop(); } catch { /* already gone */ } }, 120);
+        setTimeout(() => { try { s.osc.stop(); s.lfo.stop(); } catch { /* already stopped */ } }, 120);
         this.siren = null;
       }
       return;
@@ -149,11 +158,12 @@ export class GameAudio {
     this.siren = { osc, gain, lfo };
   }
 
-  /** A slow synthwave pulse: bass eighths under a pad that changes every bar. */
+  /** The radio: bass eighths ticking under a pad that turns over every
+   * bar — A minor, F, G, E, the sound of driving nowhere in particular. */
   startMusic() {
     this.musicOn = true;
-    const bass = [55, 55, 82.4, 55, 65.4, 55, 98, 82.4];       // A1 groove
-    const pads = [220, 174.6, 196, 164.8];                       // Am F G E
+    const bass = [55, 55, 82.4, 55, 65.4, 55, 98, 82.4];   // the A1 groove
+    const pads = [220, 174.6, 196, 164.8];                  // Am, F, G, E
     setInterval(() => {
       if (!this.ctx || this.muted) return;
       const step = this.musicStep;

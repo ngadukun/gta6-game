@@ -1,11 +1,13 @@
-// The screenshot scenes behind ?shot=title|chase|city|mission&seed=N. Each one
-// builds a fresh world from the seed, then plays the real rules forward with a
-// simple autopilot at the wheel, so the frame is what a real session looks
-// like — and the same seed always gives the same frame.
+// The screenshot scenes: ?shot=title|chase|city|mission&seed=N. A scene is
+// not a mock-up — it builds the real world from the seed and then plays the
+// real rules forward under a simple autopilot, so the frame the camera
+// takes is a frame a real session could produce, and the same seed always
+// produces the same frame.
 import { STEP } from './config.js';
 import { laneTarget } from './vehicles.js';
 
-/** A keyboard the scene can drive: the game's Input, minus the human. */
+/** A keyboard with no human attached: the game's Input, driven by the
+ * scene instead. Held keys are set wholesale, nothing is ever "tapped". */
 class StubInput {
   constructor() {
     this.down = new Set();
@@ -17,13 +19,17 @@ class StubInput {
 
   held(...codes) { return codes.some((c) => this.down.has(c)); }
   tapped() { return false; }
-  mouseWorld(camera, viewW, viewH) { return { x: this.mouseX - viewW / 2 + camera.x, y: this.mouseY - viewH / 2 + camera.y }; }
+  mouseWorld(camera, viewW, viewH) {
+    return { x: this.mouseX - viewW / 2 + camera.x, y: this.mouseY - viewH / 2 + camera.y };
+  }
   endStep() { this.mouseClicked = false; }
 
+  /** Hold exactly these keys from this step on. */
   set(...codes) { this.down = new Set(codes); }
 }
 
-/** Steer a car toward a point with the real keys: W, and A or D to turn. */
+/** Drive a car at a point with the real keys: W to go, A or D to turn, the
+ * handbrake when the point is somehow behind. Returns the distance left. */
 function driveToward(input, car, tx, ty) {
   const want = Math.atan2(ty - car.y, tx - car.x);
   let diff = want - car.angle;
@@ -37,7 +43,7 @@ function driveToward(input, car, tx, ty) {
   return Math.hypot(tx - car.x, ty - car.y);
 }
 
-/** Walk Leo toward a point. */
+/** Walk Leo at a point, one axis at a time, the way a player would. */
 function walkToward(input, player, tx, ty) {
   const keys = [];
   if (tx - player.x > 8) keys.push('KeyD');
@@ -47,6 +53,8 @@ function walkToward(input, player, tx, ty) {
   input.set(...keys);
 }
 
+/** Play the game forward `seconds` of fixed steps, letting `drive` set the
+ * keys before each one. */
 function stepSeconds(game, input, seconds, drive) {
   const steps = Math.round(seconds / STEP);
   for (let i = 0; i < steps; i += 1) {
@@ -57,8 +65,9 @@ function stepSeconds(game, input, seconds, drive) {
 }
 
 /**
- * Stage the named scene on a fresh game and return the screen to draw.
- * Any other name is the title.
+ * Stage the named scene on a fresh game and say which screen to draw.
+ * Anything unrecognised is the title — a bad query should still show the
+ * game's face, not an error.
  */
 export function stageShot(name, game) {
   const input = new StubInput();
@@ -66,8 +75,8 @@ export function stageShot(name, game) {
   const city = game.city;
 
   if (name === 'chase') {
-    // The cover: Leo in the stolen Futo, three stars, the SHD on his tail,
-    // mid-delivery through downtown with the job on the HUD.
+    // The cover shot. Leo is in the stolen Futo with three stars up and the
+    // SHD on his tail, mid-delivery on a downtown loop, the job on the HUD.
     game.screen = 'play';
     game.startStoryAt(1);
     game.missions.startNext(game);
@@ -80,12 +89,17 @@ export function stageShot(name, game) {
     let wp = 0;
     const route = [[5, 3], [5, 5], [3, 5], [3, 3], [4, 3]];
     stepSeconds(game, input, 13, () => {
+      // A staged chase must never end in an arrest: if a badge pins the
+      // autopilot mid-turn, the bust screen would replace the cover. The
+      // meter is held at zero — positions, heat and stars are untouched.
+      game.wanted.bustT = 0;
       const [ci, ri] = route[wp % route.length];
       const t = laneTarget(ci, ri, 1, 0);
       if (driveToward(input, car, t.x, t.y) < 70) wp += 1;
     });
-    // A cover needs badges in frame: if the pack lost the scent, stage the
-    // nearest Interceptor a block behind Leo for the portrait.
+    // A cover needs badges in the frame. If the pack lost the scent over
+    // thirteen seconds of driving, put the nearest Interceptor a block
+    // behind Leo for the portrait — it was coming anyway.
     const inFrame = game.police.cars.some((c) => Math.hypot(c.x - car.x, c.y - car.y) < 560);
     if (!inFrame && game.police.cars.length) {
       const cop = game.police.cars[0];
@@ -99,8 +113,8 @@ export function stageShot(name, game) {
   }
 
   if (name === 'city') {
-    // On foot in the thick of it: traffic, pedestrians, and Marisol's first
-    // job waiting on the HUD.
+    // On foot in the thick of it: traffic rolling past, pedestrians about
+    // their day, and Marisol's first job already waiting on the HUD.
     game.screen = 'play';
     game.player.x = city.places.chopShop.x + 60;
     game.player.y = city.places.chopShop.y + 46;
@@ -113,8 +127,8 @@ export function stageShot(name, game) {
   }
 
   if (name === 'mission') {
-    // The Courier, mid-flight: Paco in the passenger seat, two stars up,
-    // the marina clock running down.
+    // The Courier, mid-flight: Paco in the passenger seat, the heat already
+    // on, the marina clock running down over the beach road.
     game.screen = 'play';
     game.startStoryAt(2);
     game.missions.startNext(game);
@@ -124,15 +138,16 @@ export function stageShot(name, game) {
     mission.stageT = 96;
     mission.def.stages[1].onStart(game, mission);
     const car = game.givePlayerCar('sedan', city.places.hotel.x, city.places.hotel.y, Math.PI / 2);
-    // Straight south down the beach road, the marina clock running.
     stepSeconds(game, input, 6, () => {
+      game.wanted.bustT = 0;   // as in the chase scene: no arrests in a portrait
       driveToward(input, car, city.places.marina.x, city.places.marina.y);
     });
     game.dialogue = null;
     return 'play';
   }
 
-  // Title: the city alive behind the name, camera drifting over downtown.
+  // Title: the city alive behind the name, the camera drifting over
+  // downtown while the traffic minds itself.
   game.player.x = city.places.bank.x;
   game.player.y = city.places.bank.y;
   stepSeconds(game, input, 4, null);

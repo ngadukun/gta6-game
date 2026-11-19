@@ -1,53 +1,59 @@
-// Leo's progress, kept in the browser's local storage: cash, story progress,
-// side-work record and lifetime stats. A save is written after every job and
-// offered back on the title screen as Continue.
+// What the browser remembers for Leo: one save (cash, story progress, the
+// side-work tally, lifetime stats, where he stood) and one small set of
+// preferences that outlives any single run. Everything here is best-effort —
+// private mode, a full disk, a blocked store: the game shrugs and plays on.
 
-const KEY = 'sunhaven-save-v1';
+const SAVE_KEY = 'sunhaven-save-v1';
+const PREFS_KEY = 'sunhaven-prefs-v1';
 
-export function loadSave() {
+function readJson(key) {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data !== 'object' || data === null || typeof data.cash !== 'number') return null;
-    return data;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 
-export function storeSave(data) {
+function writeJson(key, value) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // Private mode and full storage both land here: the game simply goes on.
+    // Storage said no. Nothing here is worth stopping the game for.
   }
+}
+
+/** The saved game, or null when there is none worth offering as Continue.
+ * The check is stricter than "it parsed": a hand-edited or half-written
+ * save with a poisoned cash figure or story pointer is worse than none. */
+export function loadSave() {
+  const data = readJson(SAVE_KEY);
+  if (typeof data !== 'object' || data === null) return null;
+  if (typeof data.cash !== 'number' || !Number.isFinite(data.cash)) return null;
+  if (data.storyIndex !== undefined && typeof data.storyIndex !== 'number') return null;
+  if (data.jobsDone !== undefined && typeof data.jobsDone !== 'number') return null;
+  return data;
+}
+
+export function storeSave(data) {
+  writeJson(SAVE_KEY, data);
 }
 
 export function clearSave() {
   try {
-    localStorage.removeItem(KEY);
+    localStorage.removeItem(SAVE_KEY);
   } catch {
-    // Nothing to clear, then.
+    // Already gone, or never writable in the first place.
   }
 }
 
-// Preferences ride along separately: they survive a New Game.
-const PREFS_KEY = 'sunhaven-prefs-v1';
-
+/** Preferences (the mute switch today) — kept apart from the save so a
+ * New Game never un-mutes a player who likes the quiet. */
 export function loadPrefs() {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  const prefs = readJson(PREFS_KEY);
+  return typeof prefs === 'object' && prefs !== null ? prefs : {};
 }
 
 export function storePrefs(prefs) {
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // Preferences are a courtesy, not a promise.
-  }
+  writeJson(PREFS_KEY, prefs);
 }

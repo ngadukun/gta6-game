@@ -1,8 +1,9 @@
-// Sunhaven's conductor: the Game object every module reads, the fixed-step
-// simulation that runs the city whether or not Leo is behaving, and the boot
-// code that starts at the title screen — or, with ?shot= in the address, at
-// one staged frame for the screenshots.
-import { AMMO_PICKUP, STEP } from './config.js';
+// Sunhaven's conductor. The Game object defined here is the one thing every
+// module agrees to read: the city, the player, the law, the work. Around it
+// sits the fixed-step simulation — the city breathes on every screen, title
+// included — and, at the bottom, the boot code: title screen for a player,
+// one staged frame for a screenshot when the address says ?shot=.
+import { AMMO_PICKUP, SIREN_RANGE, STEP } from './config.js';
 import { Input } from './input.js';
 import { makeRng } from './random.js';
 import { buildCity } from './city.js';
@@ -42,9 +43,10 @@ export class Game {
     this.prompt = null;
     this.bannerState = null;
     this.danger = null;
-    this.stats = { earned: 0, jobs: 0, stolen: 0 };
+    this.stats = { earned: 0, jobs: 0, stolen: 0, shots: 0 };
     this.saveT = 0;
     this.storyCompleteShown = false;
+    // Ammo waits on three friendly porches: the shop, the marina, the hospital.
     this.pickups = [
       { x: this.city.places.chopShop.x + 52, y: this.city.places.chopShop.y - 30, active: true, t: 0 },
       { x: this.city.places.marina.x - 44, y: this.city.places.marina.y + 26, active: true, t: 0 },
@@ -56,12 +58,17 @@ export class Game {
     this.savedGame = save;
   }
 
+  /** Every car in the world, from whichever list currently owns it. */
   allCars() {
     return [...this.trafficDrivers.map((d) => d.car), ...this.parkedCars, ...this.extraCars, ...this.police.cars];
   }
 
-  // --- Hooks the other modules call -----------------------------------------
+  // --- Hooks the other modules call -------------------------------------------
 
+  /** A crime happened at (x, y). It only becomes heat if somebody saw it:
+   * an officer within earshot of the whole street, a pedestrian up close,
+   * or a driver passing through it. Seen or not, the violence itself sends
+   * the nearby crowd running. */
   onCrime(points, x, y) {
     const near = (o) => Math.hypot(o.x - x, o.y - y);
     const witnessed = this.police.cars.some((c) => near(c) < 420)
@@ -73,7 +80,7 @@ export class Game {
 
   knockPed(ped, shot) {
     knockDown(ped, this.rng);
-    if (shot) ped.stateT = 6;
+    if (shot) ped.stateT = 6;   // a shooting victim stays down longer than a bumped one
   }
 
   startDialogue(lines, onDone) {
@@ -91,15 +98,24 @@ export class Game {
     this.audio.cash();
   }
 
+  /** A car the story needs, parked at a place: red and ordinary, or grey
+   * and armoured and very hard to kill when the job is the Score. */
   spawnMissionCar(typeId, place, opts = {}) {
     const type = CAR_TYPES.find((t) => t.id === typeId) ?? CAR_TYPES[1];
     const car = makeCar(type, place.x + 56, place.y + 10, 0, opts.armored ? '#7d8590' : '#d64541');
-    if (opts.armored) { car.health = 320; car.maxHealth = 320; car.armored = true; car.mass = 2.2; }
+    if (opts.armored) {
+      car.health = 320;
+      car.maxHealth = 320;
+      car.armored = true;
+      car.mass = 2.2;
+    }
     car.missionCar = true;
     this.extraCars.push(car);
     return car;
   }
 
+  /** Put Leo straight into a fresh car of the given type (scenes use this;
+   * players use doors). */
   givePlayerCar(typeId, x, y, angle) {
     const type = CAR_TYPES.find((t) => t.id === typeId) ?? CAR_TYPES[1];
     const car = makeCar(type, x, y, angle, '#3e7cb1');
@@ -108,10 +124,12 @@ export class Game {
     return car;
   }
 
+  /** Point the story at a chapter (the screenshot scenes enter mid-story). */
   startStoryAt(index) {
     this.missions.storyIndex = index;
   }
 
+  /** The dock crates stand back up: a new Distraction is being staged. */
   resetCrates() {
     for (const crate of this.city.crates) crate.dead = false;
   }
@@ -151,11 +169,12 @@ export class Game {
     });
   }
 
-  // --- The simulation ---------------------------------------------------------
+  // --- The simulation -----------------------------------------------------------
 
   step(dt, input) {
     this.input = input;
-    // The city breathes in every screen: traffic rolls, people stroll.
+    // The city breathes on every screen: traffic rolls, people stroll,
+    // smoke rises, banners fade — whether or not Leo is free to act.
     for (const driver of this.trafficDrivers) {
       if (driver.car.dead) stepCarPhysics(driver.car, { throttle: 0, steer: 0, brake: true }, dt, this.city);
       else stepTraffic(driver, dt, this.city, this.allCars(), this.rng);
@@ -175,7 +194,9 @@ export class Game {
       return;
     }
 
+    // Leo acts, unless a conversation is holding him still.
     const player = this.player;
+    const startedInCar = !!player.car;   // an F tap that exits a car must not re-enter it in the same step
     if (!this.dialogue) {
       if (player.car) {
         this.drivePlayerCar(dt, input);
@@ -184,10 +205,10 @@ export class Game {
         stepPlayerOnFoot(player, input, dt, this.city);
         this.aimAndShoot(input);
       }
-      this.interact(input);
+      this.interact(input, startedInCar);
     }
 
-    // Police, heat, bullets, jobs.
+    // Then the world answers: the law, the heat, the bullets, the work.
     const seen = this.police.update(dt, this);
     this.wanted.update(dt, seen);
     this.combat.update(dt, this);
@@ -197,17 +218,18 @@ export class Game {
     this.stepPickups(dt);
     this.stepAmbience(dt);
 
-    // A wrecked car with Leo in it is the end of the run.
+    // A wreck burning around its driver is the end of the run.
     if (player.car && player.car.dead) {
       this.effects.burst(player.car.x, player.car.y, 26, '#ff8500', 190, 0.5);
       player.car = null;
       player.health = 0;
       this.onWasted();
     }
-    // Slow health regen once the street is quiet.
+    // Given quiet, a man on foot gets his breath back.
     if (!player.car && player.health > 0 && player.health < 100 && this.combat.hurtT <= 0) {
       player.health = Math.min(100, player.health + dt * 2.2);
     }
+    // Autosave on a slow drip, so a closed tab loses minutes, not the day.
     this.saveT += dt;
     if (this.saveT > 10) {
       this.saveT = 0;
@@ -229,23 +251,28 @@ export class Game {
       this.audio.crash();
       this.combat.shake = Math.min(9, impact / 45);
       this.effects.burst(car.x, car.y, 8, '#e8e3d8', 120, 0.3);
-      if (impact > 200) this.onCrime(18, car.x, car.y);
+      if (impact > 200) this.onCrime(18, car.x, car.y);   // a crash that loud is public
     }
-    if (car.health < 45 && Math.random() < dt * 6) this.effects.smoke(car.x, car.y, car.health < 22);
+    if (car.health < 45 && Math.random() < dt * 6) {
+      this.effects.smoke(car.x, car.y, car.health < 22);
+    }
     if (input.tapped('KeyF', 'KeyE')) this.exitCar();
   }
 
   exitCar() {
     const car = this.player.car;
     if (!car) return;
+    // Out on the driver's side, close enough to get back in.
     const side = car.angle + Math.PI / 2;
     this.player.x = car.x + Math.cos(side) * (car.type.h / 2 + 16);
     this.player.y = car.y + Math.sin(side) * (car.type.h / 2 + 16);
     this.player.car = null;
+    this.audio.door();
   }
 
   enterCar(car) {
-    // Take the car out of whichever list lent it to the street.
+    // The car changes lists: whatever lent it to the street — traffic,
+    // a parking spot — gives it up, and it becomes Leo's problem.
     const ti = this.trafficDrivers.findIndex((d) => d.car === car);
     if (ti >= 0) this.trafficDrivers.splice(ti, 1);
     const pi = this.parkedCars.indexOf(car);
@@ -254,6 +281,7 @@ export class Game {
     car.parked = false;
     this.player.car = car;
     this.stats.stolen += 1;
+    this.audio.door();
     this.audio.pickup();
     this.onCrime(45, car.x, car.y);   // somebody usually sees a car being taken
   }
@@ -266,8 +294,8 @@ export class Game {
     if (input.tapped('KeyR')) this.combat.startReload(this);
   }
 
-  /** Drive-by: Leo can fire from the driver's seat — wilder, louder, and
-   * every bit as illegal as doing it on foot. */
+  /** Drive-by: from the driver's seat Leo can still shoot — wider, louder,
+   * and every bit as illegal as doing it standing up. */
   driveBy(input) {
     const car = this.player.car;
     if (!car) return;
@@ -280,17 +308,13 @@ export class Game {
   }
 
   /** The soundscape and the small physical tells, once per step: engine and
-   * siren loops, horns from trapped traffic, tyre smoke on a hard slide. */
+   * siren loops pitched to the moment, a horn from traffic trapped behind
+   * something, tyre smoke when the car slides harder than tyres allow. */
   stepAmbience(dt) {
     const player = this.player;
     let engineRatio = null;
     if (player.car) engineRatio = Math.min(1, Math.abs(player.car.speed) / player.car.type.top);
-    let sirenOn = false;
-    if (this.wanted.stars > 0) {
-      for (const cop of this.police.cars) {
-        if (Math.hypot(cop.x - player.x, cop.y - player.y) < 720) { sirenOn = true; break; }
-      }
-    }
+    const sirenOn = this.wanted.stars > 0 && this.police.anyWithin(player.x, player.y, SIREN_RANGE);
     this.audio.updateLoops(engineRatio, sirenOn);
     for (const driver of this.trafficDrivers) {
       if (!driver.car.honk) continue;
@@ -309,37 +333,44 @@ export class Game {
     }
   }
 
-  interact(input) {
+  /** Doors and conversations. When the step began with Leo in a car, this
+   * step's F tap was the one that let him out — it is spent, and neither
+   * Marisol nor the car he just left may claim it. */
+  interact(input, startedInCar = false) {
     const player = this.player;
     this.prompt = null;
     if (player.car) return;
-    // Marisol first: the chop shop porch starts the next job.
+    // Marisol first: her porch is where work comes from.
     const shop = this.city.places.chopShop;
-    const nearShop = Math.hypot(player.x - shop.x, player.y - shop.y) < 78;
-    if (nearShop && !this.missions.busy) {
+    if (Math.hypot(player.x - shop.x, player.y - shop.y) < 78 && !this.missions.busy) {
       this.prompt = this.missions.completedStory
         ? 'F — Talk to Marisol (side work — she always has some)'
         : 'F — Talk to Marisol (a new job)';
-      if (input.tapped('KeyF', 'KeyE')) {
+      if (!startedInCar && input.tapped('KeyF', 'KeyE')) {
         this.missions.startNext(this);
         return;
       }
     }
-    // Then any car close enough to take.
+    // Then the nearest car worth taking.
     let best = null;
     let bestD = 54;
     for (const car of this.allCars()) {
       if (car.dead) continue;
       const d = Math.hypot(car.x - player.x, car.y - player.y);
-      if (d < bestD) { bestD = d; best = car; }
+      if (d < bestD) {
+        bestD = d;
+        best = car;
+      }
     }
     if (best) {
       this.prompt = `F — Take the ${best.type.name}`;
-      if (input.tapped('KeyF', 'KeyE')) this.enterCar(best);
+      if (!startedInCar && input.tapped('KeyF', 'KeyE')) this.enterCar(best);
     }
   }
 
-  /** Cars meeting pedestrians and dock crates at speed. */
+  /** Cars meeting the soft parts of the world: pedestrians, who go down,
+   * and dock crates, which at speed come apart — and count, when a certain
+   * job is running, as beautifully public noise. */
   carMeetsWorld(dt) {
     for (const car of this.allCars()) {
       if (Math.abs(car.speed) < 55) continue;
@@ -354,12 +385,16 @@ export class Game {
       if (Math.abs(car.speed) > 130) {
         for (const crate of this.city.crates) {
           if (crate.dead) continue;
-          if (Math.hypot(crate.x + crate.s / 2 - car.x, crate.y + crate.s / 2 - car.y) < crate.s / 2 + car.type.w * 0.36) {
+          const cx = crate.x + crate.s / 2;
+          const cy = crate.y + crate.s / 2;
+          if (Math.hypot(cx - car.x, cy - car.y) < crate.s / 2 + car.type.w * 0.36) {
             crate.dead = true;
-            this.effects.burst(crate.x + crate.s / 2, crate.y + crate.s / 2, 12, '#9c6644', 150, 0.4);
+            this.effects.burst(cx, cy, 12, '#9c6644', 150, 0.4);
             this.audio.crash();
             car.health -= 4;
-            if (car === this.player.car && this.missions.active?.data) this.missions.active.data.chaos = (this.missions.active.data.chaos ?? 0) + 1;
+            if (car === this.player.car && this.missions.active?.data) {
+              this.missions.active.data.chaos = (this.missions.active.data.chaos ?? 0) + 1;
+            }
           }
         }
       }
@@ -373,6 +408,7 @@ export class Game {
         if (pickup.t <= 0) pickup.active = true;
         continue;
       }
+      // On foot only — a man in a car has no hands free for a porch box.
       if (!this.player.car && Math.hypot(this.player.x - pickup.x, this.player.y - pickup.y) < 26) {
         pickup.active = false;
         pickup.t = 25;
@@ -385,6 +421,8 @@ export class Game {
 
   updateCamera(dt, ambient) {
     const target = this.player.car ?? this.player;
+    // In play, the camera leans into the velocity a little; on the other
+    // screens it simply settles where Leo is.
     const look = ambient ? 0 : 0.32;
     const tx = target.x + (target.vx ?? 0) * look;
     const ty = target.y + (target.vy ?? 0) * look;
@@ -397,11 +435,14 @@ export class Game {
     }
   }
 
-  // --- Leaving trouble behind -------------------------------------------------
+  // --- The morning after --------------------------------------------------------
 
+  /** Busted or wasted, the bill is the same shape: some cash, all of the
+   * heat, and a walk out of a public building at dawn. */
   respawn() {
-    const at = this.screen === 'busted' ? this.city.places.policeStation : this.city.places.hospital;
-    this.cash = Math.max(0, this.cash - (this.screen === 'busted' ? 150 : 200));
+    const busted = this.screen === 'busted';
+    const at = busted ? this.city.places.policeStation : this.city.places.hospital;
+    this.cash = Math.max(0, this.cash - (busted ? 150 : 200));
     this.player.car = null;
     this.player.health = 100;
     this.player.dead = false;
@@ -416,7 +457,7 @@ export class Game {
   }
 }
 
-// --- Boot ---------------------------------------------------------------------
+// --- Boot -----------------------------------------------------------------------
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -442,8 +483,9 @@ fitCanvas(game);
 window.addEventListener('resize', () => fitCanvas(game));
 
 function draw() {
-  if (game.screen === 'title') renderer.drawTitle(ctx, game, canvas.width, canvas.height);
-  else {
+  if (game.screen === 'title') {
+    renderer.drawTitle(ctx, game, canvas.width, canvas.height);
+  } else {
     renderer.drawWorld(ctx, game, canvas.width, canvas.height);
     hud.draw(ctx, game, canvas.width, canvas.height);
     if (game.screen !== 'play') renderer.drawOverlay(ctx, game, canvas.width, canvas.height);
@@ -451,13 +493,18 @@ function draw() {
 }
 
 if (params.has('shot')) {
-  // One staged frame, exactly as the screenshots will show it.
+  // One staged frame, drawn once, exactly as the screenshots show it.
   game.screen = stageShot(params.get('shot'), game);
   draw();
   window.__shotReady = true;
 } else {
   let last = performance.now();
   let acc = 0;
+  // Alt-tabbing mid-chase should not hand the SHD a free arrest: losing
+  // the window pauses a run in progress.
+  window.addEventListener('blur', () => {
+    if (game.screen === 'play') game.screen = 'paused';
+  });
   const frame = (now) => {
     acc += Math.min(0.1, (now - last) / 1000);
     last = now;
@@ -509,7 +556,9 @@ if (params.has('shot')) {
       if (input.tapped('Enter')) game.screen = 'play';
       return;
     }
-    if (input.tapped('KeyP', 'Escape')) game.screen = game.screen === 'paused' ? 'play' : 'paused';
+    if (input.tapped('KeyP', 'Escape')) {
+      game.screen = game.screen === 'paused' ? 'play' : 'paused';
+    }
   }
 
   function chooseTitle() {

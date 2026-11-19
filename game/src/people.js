@@ -1,6 +1,7 @@
-// People: Leo, the player character, when he is on foot, and the pedestrians
-// who give Sunhaven its life. Pedestrians stroll the pavements, mind their own
-// business, and run when the day turns violent.
+// People. Leo, when his own two feet are what moves him, and the thirty-odd
+// pedestrians who give the pavements their life: they stroll, they wait for
+// traffic like sensible citizens, and they run from trouble like sensible
+// citizens too.
 import { BLOCK, PITCH, PLAYER_RADIUS, PLAYER_SPRINT, PLAYER_WALK, ROAD_W } from './config.js';
 import { clampToWorld, collideCircle } from './city.js';
 
@@ -12,7 +13,8 @@ export function makePlayer(x, y) {
   };
 }
 
-/** Move Leo with the keys: screen-relative, sprint on Shift, buildings solid. */
+/** Walk Leo where the keys point: screen-relative, Shift to sprint, and
+ * buildings are solid — he slides along their walls rather than through. */
 export function stepPlayerOnFoot(player, input, dt, city) {
   let mx = 0;
   let my = 0;
@@ -20,6 +22,7 @@ export function stepPlayerOnFoot(player, input, dt, city) {
   if (input.held('KeyS', 'ArrowDown')) my += 1;
   if (input.held('KeyA', 'ArrowLeft')) mx -= 1;
   if (input.held('KeyD', 'ArrowRight')) mx += 1;
+
   const len = Math.hypot(mx, my);
   player.moving = len > 0;
   if (len > 0) {
@@ -31,18 +34,17 @@ export function stepPlayerOnFoot(player, input, dt, city) {
   }
   player.x += mx * dt;
   player.y += my * dt;
-  const fixed = collideCircle(city, player.x, player.y, PLAYER_RADIUS);
-  player.x = fixed.x;
-  player.y = fixed.y;
-  const clamped = clampToWorld(city, player.x, player.y, PLAYER_RADIUS);
-  player.x = clamped.x;
-  player.y = clamped.y;
+  const out = collideCircle(city, player.x, player.y, PLAYER_RADIUS);
+  const inside = clampToWorld(city, out.x, out.y, PLAYER_RADIUS);
+  player.x = inside.x;
+  player.y = inside.y;
 }
 
 const PED_SHIRTS = ['#ef476f', '#ffd166', '#06d6a0', '#118ab2', '#f78c6b', '#c77dff', '#f4f1de', '#e07a5f'];
 const PED_SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
-/** A point on the pavement ring around a random block: where peds like to walk. */
+/** A spot on the pavement ring around a random block — the natural habitat
+ * of the Sunhaven pedestrian. */
 function pavementPoint(rng) {
   const col = rng.int(0, 8);
   const row = rng.int(0, 6);
@@ -51,29 +53,36 @@ function pavementPoint(rng) {
   const side = rng.int(0, 3);
   const t = rng.range(0, BLOCK);
   const off = 8;
-  if (side === 0) return { x: bx + t, y: by - off };
-  if (side === 1) return { x: bx + t, y: by + BLOCK + off };
-  if (side === 2) return { x: bx - off, y: by + t };
-  return { x: bx + BLOCK + off, y: by + t };
+  switch (side) {
+    case 0: return { x: bx + t, y: by - off };
+    case 1: return { x: bx + t, y: by + BLOCK + off };
+    case 2: return { x: bx - off, y: by + t };
+    default: return { x: bx + BLOCK + off, y: by + t };
+  }
 }
 
 export function spawnPeds(rng, count) {
   const peds = [];
   for (let i = 0; i < count; i += 1) {
     const start = pavementPoint(rng);
+    const angle = rng.angle();
+    const speed = rng.range(52, 78);
+    const shirt = rng.pick(PED_SHIRTS);
+    const skin = rng.pick(PED_SKIN);
+    const target = pavementPoint(rng);
     peds.push({
-      x: start.x, y: start.y, angle: rng.range(0, Math.PI * 2),
-      speed: rng.range(52, 78), shirt: rng.pick(PED_SHIRTS), skin: rng.pick(PED_SKIN),
-      target: pavementPoint(rng), state: 'walk', stateT: 0, threat: null, walkCycle: rng.range(0, 6),
+      x: start.x, y: start.y, angle, speed, shirt, skin, target,
+      state: 'walk', stateT: 0, threat: null, walkCycle: rng.range(0, 6),
     });
   }
   return peds;
 }
 
 /**
- * Walk the pedestrians. `danger` is an optional {x, y} point of violence —
- * a gunshot, a crash — that sends everyone near it running (pass 2 behaviour,
- * wired by main when crimes happen).
+ * Advance the pedestrians. `danger`, when given, is a point where something
+ * violent just happened — a shot, a crash — and anyone close enough to have
+ * seen it runs. Cars bearing down on a walker make the walker stop and let
+ * them pass; the dead and the downed keep their own counsel.
  */
 export function stepPeds(peds, dt, city, rng, danger, cars = []) {
   for (const ped of peds) {
@@ -82,6 +91,7 @@ export function stepPeds(peds, dt, city, rng, danger, cars = []) {
       if (ped.stateT <= 0) ped.state = 'walk';
       continue;
     }
+
     if (danger && ped.state !== 'flee') {
       const d = Math.hypot(ped.x - danger.x, ped.y - danger.y);
       if (d < 190) {
@@ -90,6 +100,7 @@ export function stepPeds(peds, dt, city, rng, danger, cars = []) {
         ped.threat = { x: danger.x, y: danger.y };
       }
     }
+
     let tx;
     let ty;
     let speed = ped.speed;
@@ -106,10 +117,14 @@ export function stepPeds(peds, dt, city, rng, danger, cars = []) {
       tx = ped.target.x;
       ty = ped.target.y;
       if (Math.hypot(tx - ped.x, ty - ped.y) < 12) ped.target = pavementPoint(rng);
-      // Pavement sense: a car bearing down makes a walker freeze and let it
-      // pass rather than stroll into the grille.
+      // Pavement sense: freeze for a fast car on a collision line. The
+      // cheap squared-distance reject comes first — most cars in the city
+      // are nowhere near this walker and never need the trigonometry.
       for (const car of cars) {
         if (Math.abs(car.speed) < 90) continue;
+        const cdx = car.x - ped.x;
+        const cdy = car.y - ped.y;
+        if (cdx * cdx + cdy * cdy > 86 * 86) continue;
         const ax = car.x + Math.cos(car.angle) * 52 - ped.x;
         const ay = car.y + Math.sin(car.angle) * 52 - ped.y;
         if (ax * ax + ay * ay < 34 * 34) {
@@ -118,6 +133,7 @@ export function stepPeds(peds, dt, city, rng, danger, cars = []) {
         }
       }
     }
+
     const want = Math.atan2(ty - ped.y, tx - ped.x);
     let diff = want - ped.angle;
     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -126,16 +142,15 @@ export function stepPeds(peds, dt, city, rng, danger, cars = []) {
     ped.x += Math.cos(ped.angle) * speed * dt;
     ped.y += Math.sin(ped.angle) * speed * dt;
     ped.walkCycle += dt * speed * 0.06;
-    const fixed = collideCircle(city, ped.x, ped.y, 9);
-    ped.x = fixed.x;
-    ped.y = fixed.y;
-    const clamped = clampToWorld(city, ped.x, ped.y, 9);
-    ped.x = clamped.x;
-    ped.y = clamped.y;
+    const out = collideCircle(city, ped.x, ped.y, 9);
+    const inside = clampToWorld(city, out.x, out.y, 9);
+    ped.x = inside.x;
+    ped.y = inside.y;
   }
 }
 
-/** Knock a pedestrian down (a car did it); they get up after a few seconds. */
+/** Put a pedestrian on the ground (a car usually did it). They lie there a
+ * few seconds, then get up and pretend it never happened. */
 export function knockDown(ped, rng) {
   ped.state = 'down';
   ped.stateT = rng.range(2.5, 4.5);

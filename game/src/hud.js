@@ -1,11 +1,14 @@
-// The HUD: everything nailed to the screen rather than the world — cash and
-// health, the wanted stars, the current objective, weapon and vehicle panels,
-// the bust meter, banners and dialogue, and the minimap that keeps Leo found.
-import { WORLD_H, WORLD_W } from './config.js';
-import { districtNameAt } from './city.js';
+// The HUD: everything nailed to the glass instead of the world. Cash and
+// health top-left, the stars top-right, the job in hand across the top, the
+// pistol along the bottom, and the minimap in the corner keeping Leo found.
+// Plus the things that only appear when they matter: the bust meter, the
+// banner, the dialogue box, the prompt, and an arrow for far-off objectives.
+import { BUST_TIME, HEAT_PER_STAR, WORLD_H, WORLD_W } from './config.js';
+import { districtNameAt, roadCenterX, roadCenterY } from './city.js';
 
 const FONT = 'system-ui, -apple-system, sans-serif';
 
+/** A smoked-glass panel behind a cluster of readouts. */
 function panel(ctx, x, y, w, h, alpha = 0.55) {
   ctx.fillStyle = `rgba(10, 16, 26, ${alpha})`;
   ctx.beginPath();
@@ -32,7 +35,9 @@ export class HUD {
     ctx.fillStyle = '#ffd166';
     ctx.font = `bold 24px ${FONT}`;
     ctx.fillText(`$${game.cash.toLocaleString('en-US')}`, 26, 44);
-    // Health: Leo's on foot, his car's while driving.
+    // The health bar belongs to whoever is taking the risk: Leo on foot,
+    // his car while he is in it. Under it, a line saying which — and in a
+    // car, how fast the risk is currently travelling.
     const subject = game.player.car ?? game.player;
     const hp = Math.max(0, Math.round(subject.health));
     const maxHp = subject.maxHealth ?? 100;
@@ -44,14 +49,15 @@ export class HUD {
     ctx.font = `11px ${FONT}`;
     if (game.player.car) {
       const kmh = Math.round(Math.abs(game.player.car.speed) * 0.36);
-      ctx.fillText(`${game.player.car.type.name}  ·  ${kmh} km/h`, 26, 76 - 2);
+      ctx.fillText(`${game.player.car.type.name}  ·  ${kmh} km/h`, 26, 74);
     } else {
-      ctx.fillText('ON FOOT', 26, 76 - 2);
+      ctx.fillText('ON FOOT', 26, 74);
     }
   }
 
-  /** The pistol, bottom-left: twelve pips for the magazine, the reserve
-   * count, and a plain warning while a reload is running. */
+  /** The pistol, bottom-left: a pip for every round in the magazine, the
+   * reserve count under it, and a red warning in place of both while a
+   * reload is running — the two seconds Sunhaven holds its breath. */
   drawWeapon(ctx, game, h) {
     const c = game.combat;
     panel(ctx, 14, h - 58, 218, 44);
@@ -70,15 +76,16 @@ export class HUD {
     ctx.fillText(c.reloadT > 0 ? 'RELOADING…' : `reserve ${c.reserve}`, 76, h - 21);
   }
 
-  /** When the objective is off-screen, a gold arrow rides the screen edge
-   * and points the way — nobody should lose a job to a minimap dot. */
+  /** An objective off-screen gets a gold arrow riding the screen edge,
+   * with the distance under it: no job should ever be lost to a minimap
+   * dot. On-screen objectives need no arrow and get none. */
   drawEdgeArrow(ctx, game, w, h) {
     const obj = game.missions.objective(game);
     if (!obj || !obj.target) return;
     const p = game.player.car ?? game.player;
     const sx = obj.target.x - game.camera.x + w / 2;
     const sy = obj.target.y - game.camera.y + h / 2;
-    if (sx > 30 && sx < w - 30 && sy > 30 && sy < h - 30) return;   // on screen already
+    if (sx > 30 && sx < w - 30 && sy > 30 && sy < h - 30) return;
     const ang = Math.atan2(sy - h / 2, sx - w / 2);
     const ex = Math.max(34, Math.min(w - 34, w / 2 + Math.cos(ang) * (w / 2 - 20)));
     const ey = Math.max(34, Math.min(h - 34, h / 2 + Math.sin(ang) * (h / 2 - 20)));
@@ -87,18 +94,23 @@ export class HUD {
     ctx.rotate(ang);
     ctx.fillStyle = '#ffd166';
     ctx.beginPath();
-    ctx.moveTo(13, 0); ctx.lineTo(-8, -8); ctx.lineTo(-3, 0); ctx.lineTo(-8, 8);
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(13, 0);
+    ctx.lineTo(-8, -8);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-8, 8);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
     ctx.fillStyle = 'rgba(255,233,168,0.85)';
     ctx.font = `bold 11px ${FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText(`${Math.round(Math.hypot(p.x - obj.target.x, p.y - obj.target.y) / 10)}m`, ex, ey + 24);
+    const metres = Math.round(Math.hypot(p.x - obj.target.x, p.y - obj.target.y) / 10);
+    ctx.fillText(`${metres}m`, ex, ey + 24);
   }
 
   drawObjective(ctx, game, w) {
-    const obj = game.missions.objective(game);
-    // Wanted stars, top-right, whether or not a job is running.
+    // The stars live top-right whether or not a job is running, with a
+    // quiet line under them when heat is rising but no star has landed.
     const stars = game.wanted.stars;
     ctx.textAlign = 'right';
     ctx.font = `26px ${FONT}`;
@@ -111,12 +123,21 @@ export class HUD {
       ctx.font = `11px ${FONT}`;
       ctx.fillText('the SHD is watching…', w - 18, 64);
     }
+    // Under the stars, a hairline of gold: how full the next star is. It
+    // turns "the SHD is watching…" into something a driver can budget by.
+    if (game.wanted.heat > 0) {
+      const frac = (game.wanted.heat % HEAT_PER_STAR) / HEAT_PER_STAR;
+      ctx.fillStyle = 'rgba(232,227,216,0.18)';
+      ctx.fillRect(w - 156, 52, 138, 4);
+      ctx.fillStyle = 'rgba(255, 209, 102, 0.85)';
+      ctx.fillRect(w - 156, 52, 138 * (stars >= 5 ? 1 : frac), 4);
+    }
+    const obj = game.missions.objective(game);
     if (!obj) return;
-    const target = obj.target;
     let dist = '';
-    if (target) {
+    if (obj.target) {
       const p = game.player.car ?? game.player;
-      dist = ` — ${Math.round(Math.hypot(p.x - target.x, p.y - target.y) / 10)}m`;
+      dist = ` — ${Math.round(Math.hypot(p.x - obj.target.x, p.y - obj.target.y) / 10)}m`;
     }
     const timer = obj.timer !== null && obj.timer !== undefined ? `  ⏱ ${Math.max(0, Math.ceil(obj.timer))}s` : '';
     ctx.font = `bold 15px ${FONT}`;
@@ -149,30 +170,40 @@ export class HUD {
     ctx.fillRect(x0, y0, MW, MH);
     const px = (wx) => x0 + wx * s;
     const py = (wy) => y0 + wy * s;
-    // Sand and sea.
+    // Sand first, then the sea east of the shore line.
     ctx.fillStyle = '#eed9a4';
     ctx.fillRect(px(game.city.shoreX - 250), y0, MW, MH);
     ctx.fillStyle = '#2e8fa3';
     ctx.fillRect(px(game.city.shoreX), y0, MW, MH);
-    // Roads.
+    // The road grid, thick enough to read at a glance — drawn off the same
+    // centre-line helpers the world itself uses, so map and city agree.
     ctx.strokeStyle = '#3d4148';
     ctx.lineWidth = Math.max(1.4, 96 * s);
     for (let c = 0; c <= 9; c += 1) {
-      ctx.beginPath(); ctx.moveTo(px(c * 384 + 48), y0); ctx.lineTo(px(c * 384 + 48), y0 + MH); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px(roadCenterX(c)), y0);
+      ctx.lineTo(px(roadCenterX(c)), y0 + MH);
+      ctx.stroke();
     }
     for (let r = 0; r <= 7; r += 1) {
-      ctx.beginPath(); ctx.moveTo(x0, py(r * 384 + 48)); ctx.lineTo(x0 + MW, py(r * 384 + 48)); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x0, py(roadCenterY(r)));
+      ctx.lineTo(x0 + MW, py(roadCenterY(r)));
+      ctx.stroke();
     }
-    // Traffic as faint dots, police as flashing badges, the objective as a star.
+    // Traffic as faint dots; the law as badges that flash red and blue.
     ctx.fillStyle = 'rgba(240,240,240,0.5)';
-    for (const car of game.trafficDrivers) {
-      ctx.fillRect(px(car.car.x) - 1, py(car.car.y) - 1, 2, 2);
+    for (const driver of game.trafficDrivers) {
+      ctx.fillRect(px(driver.car.x) - 1, py(driver.car.y) - 1, 2, 2);
     }
     const flash = Math.floor(performance.now() / 300) % 2 === 0;
     for (const car of game.police.cars) {
       ctx.fillStyle = flash ? '#ef476f' : '#118ab2';
-      ctx.beginPath(); ctx.arc(px(car.x), py(car.y), 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px(car.x), py(car.y), 3, 0, Math.PI * 2);
+      ctx.fill();
     }
+    // The job, as a gold star; Leo, as a white arrow that turns with him.
     const obj = game.missions.objective(game);
     if (obj && obj.target) {
       ctx.fillStyle = '#ffd166';
@@ -180,24 +211,29 @@ export class HUD {
       ctx.textAlign = 'center';
       ctx.fillText('★', px(obj.target.x), py(obj.target.y) + 4);
     }
-    // Leo: a white arrow that turns with him.
     const p = game.player.car ?? game.player;
     ctx.translate(px(p.x), py(p.y));
     ctx.rotate(p.angle + Math.PI / 2);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.moveTo(0, -6); ctx.lineTo(4.4, 5); ctx.lineTo(0, 2.4); ctx.lineTo(-4.4, 5);
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4.4, 5);
+    ctx.lineTo(0, 2.4);
+    ctx.lineTo(-4.4, 5);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 
+  /** The bust meter only exists while a bust is actually brewing — a red
+   * bar under the objective, filling over the same seconds the SHD needs. */
   drawBustMeter(ctx, game, w) {
     const bustT = game.wanted.bustT;
     if (bustT <= 0.05) return;
     const bw = 240;
     panel(ctx, (w - bw) / 2, 58, bw, 30, 0.65);
     ctx.fillStyle = '#ef476f';
-    ctx.fillRect((w - bw) / 2 + 8, 66, (bw - 16) * Math.min(1, bustT / 2.4), 6);
+    ctx.fillRect((w - bw) / 2 + 8, 66, (bw - 16) * Math.min(1, bustT / BUST_TIME), 6);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffd7de';
     ctx.font = `bold 12px ${FONT}`;
@@ -250,18 +286,20 @@ export class HUD {
   }
 }
 
+/** Greedy word wrap: fill a line until the next word would overflow it,
+ * then start the next one lower. Returns nothing; draws as it goes. */
 function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
   const words = text.split(' ');
   let line = '';
   let yy = y;
   for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
+    const trial = line ? `${line} ${word}` : word;
+    if (ctx.measureText(trial).width > maxWidth && line) {
       ctx.fillText(line, x, yy);
       line = word;
       yy += lineHeight;
     } else {
-      line = test;
+      line = trial;
     }
   }
   if (line) ctx.fillText(line, x, yy);

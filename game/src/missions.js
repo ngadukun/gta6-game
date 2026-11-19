@@ -1,9 +1,9 @@
-// The story of Sunhaven: five jobs for Marisol Vega of Vega Auto Works, told
-// through a stage engine. A mission is a list of stages; a stage is an
-// objective with a place, an optional clock, and a test the world must pass.
-// Between missions the chop shop offers quick side work (this file's second
-// pass). Failing a job — a wrecked prize car, a dead clock — just means
-// Marisol will offer it again.
+// The work. Five story jobs for Marisol Vega of Vega Auto Works, run by a
+// small stage engine: a job is a list of stages, a stage is an objective —
+// a place to be, a thing to have done, sometimes a clock — and the engine
+// walks the list as the world satisfies each stage in turn. When the story
+// runs out, the engine deals generated side work instead, forever. A failed
+// job is not the end of anything: Marisol shrugs and offers it again.
 import { CAR_TYPES, makeCar } from './vehicles.js';
 
 const MARISOL = 'Marisol Vega';
@@ -11,16 +11,17 @@ const LEO = 'Leo';
 
 export class MissionSystem {
   constructor() {
-    this.storyIndex = 0;      // next story mission to offer
-    this.active = null;       // { def, stageIndex, stageT, data }
-    this.sideJob = null;      // generated side work, when offered
+    this.storyIndex = 0;       // the next story job Marisol will offer
+    this.active = null;        // { def, stageIndex, stageT, data, isStory }
+    this.sideJob = null;       // the generated job currently on the table
     this.completedStory = false;
-    this.jobsDone = 0;
+    this.jobsDone = 0;         // every finished job, story and side alike
   }
 
   get busy() { return this.active !== null; }
 
-  /** The HUD objective: text plus a world target, or null. */
+  /** What the HUD shows: the current stage as one line, its target, and
+   * its clock when it has one. Null when no job is running. */
   objective(game) {
     if (!this.active) return null;
     const stage = this.active.def.stages[this.active.stageIndex];
@@ -30,8 +31,8 @@ export class MissionSystem {
     return { text, target, timer: stage.timer ? this.active.stageT : null };
   }
 
-  /** Begin the next story mission — or generated side work once the story
-   * is done, so Sunhaven keeps paying Leo long after the credits. */
+  /** Offer the next job: the next story chapter while any remain, then
+   * generated side work for as long as Leo keeps showing up. */
   startNext(game) {
     if (this.busy) return false;
     const def = STORY[this.storyIndex];
@@ -59,24 +60,26 @@ export class MissionSystem {
     if (!this.active) return;
     game.audio.sting(false);
     game.banner('JOB FAILED', reason, '#ef476f');
-    game.passenger = false;   // whoever was riding with Leo bails here
+    game.passenger = false;   // whoever was riding with Leo bails out here
     this.active = null;
   }
 
   complete(game) {
     const mission = this.active;
     const { def } = mission;
-    // A reward may be a function of how the job went (a fare's distance, a
-    // chopped car's worth and condition) as well as a flat story fee.
+    // A reward can be a flat fee, or a reckoning made from how the job
+    // went — a fare's distance, a chopped car's shine.
     const reward = typeof def.reward === 'function' ? def.reward(game, mission) : def.reward;
     this.active = null;
-    game.passenger = false;   // the fare, the accountant: delivered and gone
+    game.passenger = false;   // delivered is delivered: the seat empties
     this.jobsDone += 1;
+    if (game.stats) game.stats.jobs = this.jobsDone;   // the tally the story-complete screen reads
     if (def.isStory) {
       this.storyIndex += 1;
       if (this.storyIndex >= STORY.length) this.completedStory = true;
     }
-    game.earnCash(reward, game.player.car ? game.player.car.x : game.player.x, game.player.car ? game.player.car.y : game.player.y);
+    const earner = game.player.car ?? game.player;
+    game.earnCash(reward, earner.x, earner.y);
     game.audio.sting(true);
     game.banner('JOB DONE', `${def.title} — $${reward}`, '#06d6a0');
     if (def.outro) game.startDialogue(def.outro, null);
@@ -114,7 +117,7 @@ export class MissionSystem {
   }
 }
 
-// --- Stage helpers -----------------------------------------------------------
+// --- Stage shapes --------------------------------------------------------------
 
 function atPlace(place, r = 60) {
   return (game) => {
@@ -123,10 +126,11 @@ function atPlace(place, r = 60) {
   };
 }
 
+/** A stage that is simply "be at this place". The place is read back off
+ * the stage at check time, because the defs below are written before any
+ * city exists — bindStoryPlaces fills the fixed targets in afterwards. */
 function gotoStage(text, place, extra = {}) {
   const stage = { text, target: place, ...extra };
-  // The target is read from the stage itself at check time: fixed places are
-  // bound after the city exists (bindStoryPlaces), so nothing is captured early.
   stage.check = (game, mission) => {
     const t = mission.def.stages[mission.stageIndex].target;
     if (!t) return false;
@@ -136,7 +140,7 @@ function gotoStage(text, place, extra = {}) {
   return stage;
 }
 
-// --- The story ---------------------------------------------------------------
+// --- The story -----------------------------------------------------------------
 
 const STORY = [
   {
@@ -251,9 +255,10 @@ const STORY = [
   },
 ];
 
-// --- Side work -----------------------------------------------------------------
-// Endless small jobs for after the story: Marisol always needs cars, and
-// Sunhaven always needs rides. Alternating by jobs done keeps them fresh.
+// --- Side work -------------------------------------------------------------------
+// What the shop lives on once the story is told. Three kinds of job, dealt
+// in turn: cars for the chop shop, people who need to be somewhere else,
+// and packages that need to be somewhere else even faster.
 
 const FARE_PLACES = ['hotel', 'marina', 'bank', 'hospital', 'docks', 'hideout'];
 const PLACE_NAMES = {
@@ -261,10 +266,20 @@ const PLACE_NAMES = {
   hospital: 'Sunhaven General', docks: 'the Docks', hideout: 'Leo’s Hideout',
 };
 
+/** Two different named places and the distance between them, drawn off the
+ * game stream so a replayed world offers the same work. */
+function twoPlaces(game) {
+  const [fromKey, toKey] = game.rng.shuffle(FARE_PLACES);
+  const from = game.city.places[fromKey];
+  const to = game.city.places[toKey];
+  return { fromKey, toKey, from, to, dist: Math.hypot(to.x - from.x, to.y - from.y) };
+}
+
 function makeSideJob(game, n) {
   const P = game.city.places;
-  if (n % 2 === 0) {
-    // Chop Run: any car worth stealing, priced by value and condition.
+  if (n % 3 === 0) {
+    // Chop Run: anything worth stealing, priced on arrival by what it is
+    // worth and how much of it is left.
     return {
       title: 'Chop Run', isStory: false,
       reward: (g, m) => Math.max(60, Math.round(m.data.car.type.value * 0.5 * Math.max(0.25, m.data.car.health / 100))),
@@ -293,36 +308,60 @@ function makeSideJob(game, n) {
       ],
     };
   }
-  // Fare Job: a stranger, a clock, and a tip for distance.
-  const [fromKey, toKey] = game.rng.shuffle(FARE_PLACES);
-  const from = P[fromKey];
-  const to = P[toKey];
-  const dist = Math.hypot(to.x - from.x, to.y - from.y);
+  if (n % 3 === 1) {
+    // Fare Job: a stranger, a destination, a clock, and a fare that grows
+    // with the distance between the two.
+    const { fromKey, toKey, from, to, dist } = twoPlaces(game);
+    return {
+      title: 'Fare Job', isStory: false,
+      reward: () => Math.round(110 + dist * 0.22),
+      intro: [
+        { who: MARISOL, text: `A friend of mine needs a ride from ${PLACE_NAMES[fromKey]} to ${PLACE_NAMES[toKey]}. Off the books. The meter is generous.` },
+      ],
+      stages: [
+        {
+          text: `Pick up your fare at ${PLACE_NAMES[fromKey]} — bring a car`,
+          target: from,
+          check: (g) => !!g.player.car && atPlace(from, 62)(g),
+        },
+        {
+          text: `Drop your fare at ${PLACE_NAMES[toKey]}`,
+          target: to,
+          timer: Math.round(dist / 21) + 35,
+          onStart: (g) => { g.passenger = true; },
+          check: (g) => !!g.player.car && atPlace(to, 68)(g),
+        },
+      ],
+    };
+  }
+  // Delivery Run: no passenger, no conversation — a package, a clock set
+  // by the same generous arithmetic as the fares, and a fee for the miles.
+  const { fromKey, toKey, from, to, dist } = twoPlaces(game);
   return {
-    title: 'Fare Job', isStory: false,
-    reward: () => Math.round(110 + dist * 0.22),
+    title: 'Delivery Run', isStory: false,
+    reward: () => Math.round(140 + dist * 0.18),
     intro: [
-      { who: MARISOL, text: `A friend of mine needs a ride from ${PLACE_NAMES[fromKey]} to ${PLACE_NAMES[toKey]}. Off the books. The meter is generous.` },
+      { who: MARISOL, text: `A package at ${PLACE_NAMES[fromKey]} needs to be at ${PLACE_NAMES[toKey]} — quickly, and without ever having officially existed. You know the way.` },
     ],
     stages: [
       {
-        text: `Pick up your fare at ${PLACE_NAMES[fromKey]} — bring a car`,
+        text: `Collect the package at ${PLACE_NAMES[fromKey]}`,
         target: from,
-        check: (g) => !!g.player.car && atPlace(from, 62)(g),
+        check: (g) => atPlace(from, 60)(g),
       },
       {
-        text: `Drop your fare at ${PLACE_NAMES[toKey]}`,
+        text: `Deliver the package to ${PLACE_NAMES[toKey]}`,
         target: to,
         timer: Math.round(dist / 21) + 35,
-        onStart: (g) => { g.passenger = true; },
-        check: (g) => !!g.player.car && atPlace(to, 68)(g),
+        check: (g) => atPlace(to, 65)(g),
       },
     ],
   };
 }
 
-// Stage targets that point at fixed places are filled in here, once, from the
-// city the game built: the defs above are written before any city exists.
+// The defs above are written before any city exists, so the stages that
+// point at fixed places carry null targets until this binds them, once,
+// from the city the game actually built.
 export function bindStoryPlaces(city) {
   const P = city.places;
   STORY[0].stages[0].target = P.docks;
