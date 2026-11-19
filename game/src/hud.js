@@ -1,8 +1,10 @@
-// The HUD: everything nailed to the glass instead of the world. Cash and
-// health top-left, the stars top-right, the job in hand across the top, the
-// pistol along the bottom, and the minimap in the corner keeping Leo found.
-// Plus the things that only appear when they matter: the bust meter, the
-// banner, the dialogue box, the prompt, and an arrow for far-off objectives.
+// hud.js — everything nailed to the glass instead of the world.
+//
+// Cash and health top-left, the stars top-right, the job in hand across
+// the top, the pistol along the bottom, and the minimap in the corner
+// keeping Leo found. Plus the things that only appear when they matter:
+// the bust meter, the banner, the dialogue box, the prompt, and a gold
+// arrow for objectives too far away to see.
 import { BUST_TIME, HEAT_PER_STAR, WORLD_H, WORLD_W } from './config.js';
 import { districtNameAt, roadCenterX, roadCenterY } from './city.js';
 
@@ -36,8 +38,8 @@ export class HUD {
     ctx.font = `bold 24px ${FONT}`;
     ctx.fillText(`$${game.cash.toLocaleString('en-US')}`, 26, 44);
     // The health bar belongs to whoever is taking the risk: Leo on foot,
-    // his car while he is in it. Under it, a line saying which — and in a
-    // car, how fast the risk is currently travelling.
+    // his car while he is in it. Under it, a line saying which — and in
+    // a car, how fast the risk is currently travelling.
     const subject = game.player.car ?? game.player;
     const hp = Math.max(0, Math.round(subject.health));
     const maxHp = subject.maxHealth ?? 100;
@@ -65,8 +67,11 @@ export class HUD {
     ctx.fillStyle = '#e8e3d8';
     ctx.font = `bold 11px ${FONT}`;
     ctx.fillText('PISTOL', 26, h - 32);
+    // The last three rounds burn orange: a quiet warning, before the
+    // click, that the next conversation with the SHD may be one-sided.
+    const pip = c.mag <= 3 && c.reloadT <= 0 ? '#ef8354' : '#ffd166';
     for (let i = 0; i < 12; i += 1) {
-      ctx.fillStyle = i < c.mag ? '#ffd166' : 'rgba(232,227,216,0.22)';
+      ctx.fillStyle = i < c.mag ? pip : 'rgba(232,227,216,0.22)';
       ctx.beginPath();
       ctx.arc(76 + i * 11, h - 36, 3.4, 0, Math.PI * 2);
       ctx.fill();
@@ -175,8 +180,9 @@ export class HUD {
     ctx.fillRect(px(game.city.shoreX - 250), y0, MW, MH);
     ctx.fillStyle = '#2e8fa3';
     ctx.fillRect(px(game.city.shoreX), y0, MW, MH);
-    // The road grid, thick enough to read at a glance — drawn off the same
-    // centre-line helpers the world itself uses, so map and city agree.
+    // The road grid, thick enough to read at a glance — drawn off the
+    // same centre-line helpers the world itself uses, so map and city
+    // can never disagree.
     ctx.strokeStyle = '#3d4148';
     ctx.lineWidth = Math.max(1.4, 96 * s);
     for (let c = 0; c <= 9; c += 1) {

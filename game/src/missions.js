@@ -1,9 +1,11 @@
-// The work. Five story jobs for Marisol Vega of Vega Auto Works, run by a
-// small stage engine: a job is a list of stages, a stage is an objective —
-// a place to be, a thing to have done, sometimes a clock — and the engine
-// walks the list as the world satisfies each stage in turn. When the story
-// runs out, the engine deals generated side work instead, forever. A failed
-// job is not the end of anything: Marisol shrugs and offers it again.
+// missions.js — the work.
+//
+// Five story jobs for Marisol Vega of Vega Auto Works, run by a small
+// stage engine: a job is a list of stages, a stage is an objective — a
+// place to be, a thing to have done, sometimes a clock — and the engine
+// walks the list as the world satisfies each stage in turn. When the
+// story runs out, the engine deals generated side work instead, forever.
+// A failed job ends nothing: Marisol shrugs and offers it again.
 import { CAR_TYPES, makeCar } from './vehicles.js';
 
 const MARISOL = 'Marisol Vega';
@@ -20,15 +22,21 @@ export class MissionSystem {
 
   get busy() { return this.active !== null; }
 
-  /** What the HUD shows: the current stage as one line, its target, and
-   * its clock when it has one. Null when no job is running. */
+  /** What the HUD shows: the current stage as one line, its target, its
+   * clock when it has one, and where it sits in its job (progress.at of
+   * progress.of) for anything that wants to show the road still to go.
+   * Null when no job is running. */
   objective(game) {
     if (!this.active) return null;
     const stage = this.active.def.stages[this.active.stageIndex];
     if (!stage) return null;
     const target = typeof stage.target === 'function' ? stage.target(game, this.active) : stage.target;
     const text = stage.dynamicText ? stage.dynamicText(this.active) : stage.text;
-    return { text, target, timer: stage.timer ? this.active.stageT : null };
+    return {
+      text, target,
+      timer: stage.timer ? this.active.stageT : null,
+      progress: { at: this.active.stageIndex + 1, of: this.active.def.stages.length },
+    };
   }
 
   /** Offer the next job: the next story chapter while any remain, then
@@ -62,6 +70,7 @@ export class MissionSystem {
     game.banner('JOB FAILED', reason, '#ef476f');
     game.passenger = false;   // whoever was riding with Leo bails out here
     this.active = null;
+    this.sideJob = null;      // a failed job leaves the table entirely
   }
 
   complete(game) {
@@ -98,7 +107,10 @@ export class MissionSystem {
     if (stage.timer) {
       mission.stageT -= dt;
       if (mission.stageT <= 0) {
-        this.fail(game, 'Out of time. Marisol shrugs: “Traffic, huh?”');
+        // Name the errand that ran out, not just the clock: "the marina
+        // run", not "a job", is what Leo failed to finish.
+        const what = stage.dynamicText ? stage.dynamicText(mission) : stage.text;
+        this.fail(game, `Out of time — “${what}”. Marisol shrugs: “Traffic, huh?”`);
         return;
       }
     }
@@ -117,7 +129,7 @@ export class MissionSystem {
   }
 }
 
-// --- Stage shapes --------------------------------------------------------------
+// --- Stage shapes -----------------------------------------------------------
 
 function atPlace(place, r = 60) {
   return (game) => {
@@ -140,7 +152,7 @@ function gotoStage(text, place, extra = {}) {
   return stage;
 }
 
-// --- The story -----------------------------------------------------------------
+// --- The story ----------------------------------------------------------------
 
 const STORY = [
   {
@@ -255,7 +267,7 @@ const STORY = [
   },
 ];
 
-// --- Side work -------------------------------------------------------------------
+// --- Side work ------------------------------------------------------------------
 // What the shop lives on once the story is told. Three kinds of job, dealt
 // in turn: cars for the chop shop, people who need to be somewhere else,
 // and packages that need to be somewhere else even faster.
@@ -266,8 +278,8 @@ const PLACE_NAMES = {
   hospital: 'Sunhaven General', docks: 'the Docks', hideout: 'Leo’s Hideout',
 };
 
-/** Two different named places and the distance between them, drawn off the
- * game stream so a replayed world offers the same work. */
+/** Two different named places and the distance between them, drawn off
+ * the game stream so a replayed world offers the same work. */
 function twoPlaces(game) {
   const [fromKey, toKey] = game.rng.shuffle(FARE_PLACES);
   const from = game.city.places[fromKey];
@@ -309,8 +321,8 @@ function makeSideJob(game, n) {
     };
   }
   if (n % 3 === 1) {
-    // Fare Job: a stranger, a destination, a clock, and a fare that grows
-    // with the distance between the two.
+    // Fare Job: a stranger, a destination, a clock, and a fare that
+    // grows with the distance between the two.
     const { fromKey, toKey, from, to, dist } = twoPlaces(game);
     return {
       title: 'Fare Job', isStory: false,

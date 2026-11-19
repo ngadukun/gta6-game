@@ -42,6 +42,10 @@ node serve.ts            # then open http://localhost:8080
 
 Begin at **Vega Auto Works** on the west side: walk to Marisol's porch and press F for the first job. To lose the police, break line of sight — heat only cools while no officer can see you. Ammo pickups wait at the chop shop, the marina and the hospital. When the story ends, the city doesn't: Marisol keeps the side work coming.
 
+## One city, every time
+
+Sunhaven is dealt from a seed. The city, the traffic, the crowds and the work are all drawn from one seeded stream (`game/src/random.js`), and the simulation advances in fixed steps — so seed 7 is the same city on every machine, and the screenshots in this repo are frames a real session of that seed genuinely reaches. Change the seed in the address (`?seed=42`) and the same streets grow a different town.
+
 ## Layout
 
 - `game/` — the game itself: `index.html` plus ES modules in `game/src/`, one responsibility each (city, vehicles, people, police, combat, missions, hud, render, audio, save, shots…).

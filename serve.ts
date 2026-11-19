@@ -1,9 +1,10 @@
-// The smallest useful web server: just enough to play Sunhaven locally.
+// serve.ts — the smallest useful web server: just enough to play
+// Sunhaven locally.
 //   node serve.ts                 → http://localhost:8080
 //   node serve.ts --port 9000     → http://localhost:9000
-// It serves only what lives inside game/, with the content types a browser
-// game needs, and it refuses — politely, with a 403 — any path that tries
-// to climb out of that folder.
+// It serves only what lives inside game/, with the content types a
+// browser game needs, and it refuses — politely, with a 403 — any path
+// that tries to climb out of that folder.
 import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -38,6 +39,11 @@ const MIME = {
 };
 
 const server = createServer((request, response) => {
+  // A static game server reads; it does not take dictation.
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    response.writeHead(405, { allow: 'GET, HEAD' }).end('method not allowed');
+    return;
+  }
   const url = new URL(request.url ?? '/', 'http://localhost');
   let pathname;
   try {

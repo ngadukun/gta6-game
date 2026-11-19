@@ -1,7 +1,7 @@
-// Combat: the pistol Leo carries, the bullets it throws, and everything
-// they can meet — walls, people, other people's cars. The SHD never fires
-// back; in Sunhaven the danger to a man on foot is not a bullet but a badge
-// at his elbow, or two tons of traffic arriving at the wrong moment.
+// combat.js — Leo's pistol, its bullets, and everything a bullet can
+// meet: walls, people, other people's cars. The SHD never fires back. In
+// Sunhaven the danger to a man on foot is not a round but a badge at his
+// elbow — or two tons of traffic arriving at the wrong moment.
 import { PLAYER_RADIUS } from './config.js';
 
 const MAG_SIZE = 12;        // rounds in the pistol
@@ -16,11 +16,11 @@ export class Combat {
     this.reloadT = 0;    // seconds left on the current reload, 0 when idle
     this.cooldown = 0;   // seconds until the pistol can fire again
     this.hurtT = 0;      // grace period after Leo is knocked down
-    this.shake = 0;      // camera shake, in pixels, decaying — the renderer reads it
+    this.shake = 0;      // camera shake in pixels, decaying — the renderer reads it
   }
 
-  /** One trigger pull from (x, y) along angle. spreadScale widens the cone:
-   * a shot from a moving car's window is never a marksman's shot. */
+  /** One trigger pull from (x, y) along angle. spreadScale widens the
+   * cone: a shot from a moving car's window is never a marksman's shot. */
   tryShoot(game, x, y, angle, spreadScale = 1) {
     if (this.cooldown > 0 || this.reloadT > 0) return false;
     if (this.mag <= 0) {
@@ -29,7 +29,7 @@ export class Combat {
     }
     this.mag -= 1;
     this.cooldown = 0.16;
-    if (game.stats) game.stats.shots = (game.stats.shots ?? 0) + 1;   // the record the story-complete screen reads
+    if (game.stats) game.stats.shots = (game.stats.shots ?? 0) + 1;   // the tally the story-complete screen reads
     const spread = game.rng.range(-0.035, 0.035) * spreadScale;
     const dir = angle + spread;
     this.bullets.push({
@@ -38,8 +38,8 @@ export class Combat {
       vy: Math.sin(dir) * BULLET_SPEED,
       life: BULLET_LIFE,
     });
-    // Muzzle sparks, and a brass casing kicked out sideways to ping once
-    // on the pavement and be forgotten.
+    // Muzzle sparks — and a brass casing kicked out sideways, to ping
+    // once on the pavement and be forgotten.
     game.effects.burst(x + Math.cos(angle) * 20, y + Math.sin(angle) * 20, 3, '#ffd166', 90, 0.09);
     game.effects.burst(x - Math.sin(angle) * 7, y + Math.cos(angle) * 7, 1, '#e8c15a', 42, 0.3);
     game.audio.shot();
@@ -106,14 +106,20 @@ export class Combat {
       if (bullet.life <= 0) continue;
 
       // A car takes the hit as damage. A police car takes it as an insult
-      // the whole department hears about.
+      // the whole department hears about. And a car that dies of it goes
+      // out properly: a flash of orange and the first smoke of the wreck.
       for (const car of cars) {
         if (car === game.player.car) continue;
         if (Math.hypot(car.x - bullet.x, car.y - bullet.y) < car.type.w * 0.44) {
           bullet.life = 0;
+          const wasDead = car.dead;
           car.health -= 9;
           if (car.health <= 0) car.dead = true;
           game.effects.burst(bullet.x, bullet.y, 5, '#ffb703', 120, 0.16);
+          if (car.dead && !wasDead) {
+            game.effects.burst(car.x, car.y, 10, '#ff8500', 150, 0.35);
+            game.effects.smoke(car.x, car.y, true);
+          }
           game.audio.hit();
           if (car.isPolice) game.onCrime(30, bullet.x, bullet.y);
           break;
@@ -125,8 +131,8 @@ export class Combat {
     this.hurtFromCars(game, dt);
   }
 
-  /** Traffic is the real weapon in Sunhaven: a car moving fast enough that
-   * reaches Leo on foot puts him on the ground and takes its price. */
+  /** Traffic is the real weapon in Sunhaven: a car moving fast enough
+   * that reaches Leo on foot puts him on the ground and takes its price. */
   hurtFromCars(game, dt) {
     const { player } = game;
     if (player.car || this.hurtT > 0 || player.dead) return;

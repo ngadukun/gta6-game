@@ -1,11 +1,13 @@
-// The Sunhaven Police Department. Two halves: the wanted level — a pot of
-// heat that witnessed crime fills and obscurity slowly drains — and the
-// force itself, Interceptors that answer the stars. The SHD does not shoot.
-// It arrives, it keeps arriving, and if it can hold Leo still for two and a
-// half seconds, the day is over.
-import { BUST_TIME, COLS, COP_SIGHT_RANGE, HEAT_DECAY, HEAT_PER_STAR, MAX_STARS, PITCH, ROWS } from './config.js';
+// police.js — the Sunhaven Police Department.
+//
+// Two halves. The wanted level: a pot of heat that witnessed crime fills
+// and obscurity slowly drains. And the force itself: Interceptors that
+// answer the stars, navigate the road grid while the chase is far away,
+// hunt in the open when it is close, and win the day not with gunfire —
+// the SHD does not shoot — but by holding Leo still long enough.
+import { BUST_TIME, COLS, COP_SIGHT_RANGE, HEAT_DECAY, HEAT_PER_STAR, MAX_STARS, ROWS, wrapAngle } from './config.js';
 import { laneTarget, makeCar, POLICE_TYPE, stepCarPhysics } from './vehicles.js';
-import { roadCenterX, roadCenterY } from './city.js';
+import { nearestIntersection, roadCenterX, roadCenterY } from './city.js';
 
 export class WantedLevel {
   constructor() {
@@ -68,9 +70,9 @@ export class PoliceForce {
     const target = player.car ?? player;
     const want = COPS_BY_STARS[wanted.stars];
 
-    // A wrecked Interceptor is out of the chase: it stays on the street as
-    // a wreck, but it no longer drives, no longer counts as eyes on Leo,
-    // and no longer blocks a live replacement from being sent.
+    // A wrecked Interceptor is out of the chase: it stays on the street
+    // as a wreck, but it no longer drives, no longer counts as eyes on
+    // Leo, and no longer blocks a live replacement from being sent.
     const live = this.units.reduce((n, u) => n + (u.car.dead ? 0 : 1), 0);
     if (live < want) this.spawnNear(game);
 
@@ -91,26 +93,26 @@ export class PoliceForce {
       if (dist < COP_SIGHT_RANGE) seen = true;
       if (want === 0) continue;
 
-      // Wedged detection: full throttle and walking pace means a wall won.
-      // The unit gives up on the spot, reverses out, and makes for the
-      // nearest intersection to start again.
+      // Wedged detection: full throttle at walking pace means a wall
+      // won. The unit gives up on the spot, reverses out, and makes for
+      // the nearest intersection to start again.
       if (dist > 120 && Math.abs(car.speed) < 22) unit.stuckT = (unit.stuckT ?? 0) + dt;
       else unit.stuckT = 0;
       if ((unit.stuckT ?? 0) > 0.9 && !unit.recover) {
-        const ci = Math.max(0, Math.min(COLS, Math.round(car.x / PITCH)));
-        const ri = Math.max(0, Math.min(ROWS, Math.round(car.y / PITCH)));
+        const ci = nearestIntersection(car.x, COLS);
+        const ri = nearestIntersection(car.y, ROWS);
         unit.recover = { x: roadCenterX(ci), y: roadCenterY(ri), t: 3, backT: 0.45 };
         unit.stuckT = 0;
       }
 
       // Where to aim. Three regimes: recovering (to the intersection it
-      // chose), navigating (road by road toward the suspect's block, while
-      // the chase is still far away), and hunting (straight at where the
-      // suspect is about to be).
-      const pci = Math.max(0, Math.min(COLS, Math.round(target.x / PITCH)));
-      const pri = Math.max(0, Math.min(ROWS, Math.round(target.y / PITCH)));
-      const hereC = Math.max(0, Math.min(COLS, Math.round(car.x / PITCH)));
-      const hereR = Math.max(0, Math.min(ROWS, Math.round(car.y / PITCH)));
+      // chose), navigating (road by road toward the suspect's block,
+      // while the chase is still far away), and hunting (straight at
+      // where the suspect is about to be).
+      const pci = nearestIntersection(target.x, COLS);
+      const pri = nearestIntersection(target.y, ROWS);
+      const hereC = nearestIntersection(car.x, COLS);
+      const hereR = nearestIntersection(car.y, ROWS);
       const onRoads = !unit.recover && dist > 300 && (pci !== hereC || pri !== hereR);
 
       let aimX;
@@ -153,18 +155,16 @@ export class PoliceForce {
       }
 
       const wantAngle = Math.atan2(aimY - car.y, aimX - car.x);
-      let diff = wantAngle - car.angle;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
+      const diff = wrapAngle(wantAngle - car.angle);
       const steer = Math.max(-1, Math.min(1, diff * 3.1));
 
       // A long way off, officers drive harder than the book allows. The
-      // borrowed top speed is handed back before anything else can see it.
+      // borrowed top speed is handed back before anything else sees it.
       const savedTop = car.type.top;
       if (dist > 620) car.type = { ...car.type, top: savedTop * 1.18 };
 
-      // Facing the wrong way, a badge crawls and turns rather than flooring
-      // it into the scenery.
+      // Facing the wrong way, a badge crawls and turns rather than
+      // flooring it into the scenery.
       let throttle = Math.abs(diff) > 1.9 ? 0.22 : 1;
       let brake = false;
       if (recovering && unit.recover && unit.recover.backT > 0) {
@@ -207,24 +207,30 @@ export class PoliceForce {
 
   /** Bring one more Interceptor into the world at an intersection a few
    * blocks from the suspect — close enough to matter, far enough to be a
-   * surprise. Gives up quietly when no spot qualifies. */
+   * surprise. If the whole neighbourhood refuses, the net widens; if it
+   * still refuses, the unit simply rolls out of the station itself: a
+   * star that asks for a car should always, eventually, get one. */
   spawnNear(game) {
     const { player, rng } = game;
     const target = player.car ?? player;
-    for (let tries = 0; tries < 8; tries += 1) {
-      const ci = Math.max(0, Math.min(COLS, Math.round(target.x / PITCH) + rng.int(-3, 3)));
-      const ri = Math.max(0, Math.min(ROWS, Math.round(target.y / PITCH) + rng.int(-3, 3)));
-      const x = roadCenterX(ci);
-      const y = roadCenterY(ri);
-      const dist = Math.hypot(x - target.x, y - target.y);
-      if (dist < 380 || dist > 1150) continue;
-      const dirX = x < target.x ? 1 : -1;
-      const spot = laneTarget(ci, ri, dirX, 0);
+    const place = (ci, ri) => {
+      const spot = laneTarget(ci, ri, roadCenterX(ci) < target.x ? 1 : -1, 0);
       const car = makeCar({ ...POLICE_TYPE }, spot.x, spot.y, Math.atan2(target.y - spot.y, target.x - spot.x), '#f5f7fa');
       car.isPolice = true;
       car.mass = 1.6;
       this.units.push({ car });
-      return;
+    };
+    for (const [near, far] of [[380, 1150], [250, 1400]]) {
+      for (let tries = 0; tries < 8; tries += 1) {
+        const ci = Math.max(0, Math.min(COLS, nearestIntersection(target.x, COLS) + rng.int(-3, 3)));
+        const ri = Math.max(0, Math.min(ROWS, nearestIntersection(target.y, ROWS) + rng.int(-3, 3)));
+        const dist = Math.hypot(roadCenterX(ci) - target.x, roadCenterY(ri) - target.y);
+        if (dist < near || dist > far) continue;
+        place(ci, ri);
+        return;
+      }
     }
+    const home = game.city.places.policeStation;
+    place(nearestIntersection(home.x, COLS), nearestIntersection(home.y, ROWS));
   }
 }

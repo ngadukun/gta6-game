@@ -1,8 +1,8 @@
-// People. Leo, when his own two feet are what moves him, and the thirty-odd
-// pedestrians who give the pavements their life: they stroll, they wait for
-// traffic like sensible citizens, and they run from trouble like sensible
-// citizens too.
-import { BLOCK, PITCH, PLAYER_RADIUS, PLAYER_SPRINT, PLAYER_WALK, ROAD_W } from './config.js';
+// people.js — Leo on his own two feet, and the thirty-odd pedestrians who
+// give Sunhaven's pavements their life. They stroll, they wait for traffic
+// like sensible citizens, and they run from trouble like sensible citizens
+// too. Nobody in this file has ever hurried anywhere except away.
+import { BLOCK, PED_RADIUS, PITCH, PLAYER_RADIUS, PLAYER_SPRINT, PLAYER_WALK, ROAD_W, wrapAngle } from './config.js';
 import { clampToWorld, collideCircle } from './city.js';
 
 export function makePlayer(x, y) {
@@ -43,8 +43,8 @@ export function stepPlayerOnFoot(player, input, dt, city) {
 const PED_SHIRTS = ['#ef476f', '#ffd166', '#06d6a0', '#118ab2', '#f78c6b', '#c77dff', '#f4f1de', '#e07a5f'];
 const PED_SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
-/** A spot on the pavement ring around a random block — the natural habitat
- * of the Sunhaven pedestrian. */
+/** A spot on the pavement ring around a random block — the natural
+ * habitat of the Sunhaven pedestrian. */
 function pavementPoint(rng) {
   const col = rng.int(0, 8);
   const row = rng.int(0, 6);
@@ -79,10 +79,10 @@ export function spawnPeds(rng, count) {
 }
 
 /**
- * Advance the pedestrians. `danger`, when given, is a point where something
- * violent just happened — a shot, a crash — and anyone close enough to have
- * seen it runs. Cars bearing down on a walker make the walker stop and let
- * them pass; the dead and the downed keep their own counsel.
+ * Advance the pedestrians. `danger`, when given, is a point where
+ * something violent just happened — a shot, a crash — and anyone close
+ * enough to have seen it runs. Cars bearing down on a walker make the
+ * walker stop and let them pass; the downed keep their own counsel.
  */
 export function stepPeds(peds, dt, city, rng, danger, cars = []) {
   for (const ped of peds) {
@@ -135,22 +135,20 @@ export function stepPeds(peds, dt, city, rng, danger, cars = []) {
     }
 
     const want = Math.atan2(ty - ped.y, tx - ped.x);
-    let diff = want - ped.angle;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
+    const diff = wrapAngle(want - ped.angle);
     ped.angle += Math.max(-3.4 * dt, Math.min(3.4 * dt, diff));
     ped.x += Math.cos(ped.angle) * speed * dt;
     ped.y += Math.sin(ped.angle) * speed * dt;
     ped.walkCycle += dt * speed * 0.06;
-    const out = collideCircle(city, ped.x, ped.y, 9);
-    const inside = clampToWorld(city, out.x, out.y, 9);
+    const out = collideCircle(city, ped.x, ped.y, PED_RADIUS);
+    const inside = clampToWorld(city, out.x, out.y, PED_RADIUS);
     ped.x = inside.x;
     ped.y = inside.y;
   }
 }
 
-/** Put a pedestrian on the ground (a car usually did it). They lie there a
- * few seconds, then get up and pretend it never happened. */
+/** Put a pedestrian on the ground (a car usually did it). They lie there
+ * a few seconds, then get up and pretend it never happened. */
 export function knockDown(ped, rng) {
   ped.state = 'down';
   ped.stateT = rng.range(2.5, 4.5);

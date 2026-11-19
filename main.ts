@@ -1,6 +1,6 @@
-// Sunhaven's handover program (Node 22, standard library only).
+// main.ts — Sunhaven's handover program (Node 22, standard library only).
 //
-// The game is the game/ folder beside this file: plain static files that a
+// The game is the game/ folder beside this file: plain static files a
 // desktop browser opens offline — no build step, no network, nothing to
 // install. This program performs the handover the gta6-01 kit prescribes:
 // copy game/ and screenshots/ into the output directory, then write
@@ -18,14 +18,18 @@ import { buildDossier } from './vendor/makefun-game.ts';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-// Pre-flight: name any screenshot from shots.json that is not on disk yet.
-// The dossier builder refuses an entry with a missing screen anyway; this
-// just says which one, in plain words, before the refusal arrives.
+// Pre-flight: name any screenshot from shots.json that is not on disk
+// yet — and any that is on disk but too heavy to hand in. The dossier
+// builder refuses both anyway; this just says which one, and why, in
+// plain words, before the refusal arrives.
 try {
   const shots = JSON.parse(readFileSync(join(here, 'shots.json'), 'utf8'));
   for (const shot of shots) {
-    if (!existsSync(join(here, 'screenshots', shot.name))) {
+    const file = join(here, 'screenshots', shot.name);
+    if (!existsSync(file)) {
       console.error(`warning: screenshots/${shot.name} is missing — capture it before handing in (see README)`);
+    } else if (statSync(file).size > 262144) {
+      console.error(`warning: screenshots/${shot.name} is ${statSync(file).size} bytes — over the 256 KiB cap; re-encode it before handing in`);
     }
   }
 } catch {

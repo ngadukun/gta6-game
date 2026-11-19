@@ -1,7 +1,9 @@
-// The small weather of the street: muzzle sparks, plaster dust, tyre smoke
-// at the limit, engine smoke over a dying car, and the green numbers that
-// drift up off the pavement when money changes hands. One pool for all of
-// it, updated here and drawn by whoever owns the canvas.
+// particles.js — the small weather of the street.
+//
+// Muzzle sparks, plaster dust, tyre smoke at the limit, engine smoke over
+// a dying car, and the green numbers that drift up off the pavement when
+// money changes hands. One pool for all of it, updated here and drawn by
+// whoever owns the canvas.
 
 export class Effects {
   constructor() {
@@ -10,7 +12,7 @@ export class Effects {
   }
 
   /** Keep the pools bounded no matter how violent the minute gets: past
-   * the cap, the oldest particles are retired early. A long gunfight in a
+   * the cap, the oldest particles retire early. A long gunfight in a
    * traffic jam should never be allowed to eat the frame rate. */
   trim() {
     if (this.parts.length > 900) this.parts.splice(0, this.parts.length - 900);
@@ -32,8 +34,8 @@ export class Effects {
     }
   }
 
-  /** A rising puff off a hot engine — pale while the car limps, dark when
-   * it is nearly done. */
+  /** A rising puff off a hot engine — pale while the car limps, dark
+   * when it is nearly done. */
   smoke(x, y, dark) {
     this.parts.push({
       x: x + (Math.random() - 0.5) * 8, y: y + (Math.random() - 0.5) * 8,
@@ -44,8 +46,8 @@ export class Effects {
     });
   }
 
-  /** A soft grey breath from the rear tyres — drifting, or a burnout. The
-   * pool is capped: a long slide should not be allowed to eat the frame. */
+  /** A soft grey breath from the rear tyres — drifting, or a burnout.
+   * The pool is capped: a long slide should not eat the frame either. */
   tireSmoke(x, y) {
     if (this.parts.length > 420) return;
     this.parts.push({
@@ -60,6 +62,14 @@ export class Effects {
   /** Floating words: "+$300", "AMMO +36" — the street's bookkeeping. */
   text(x, y, str, color) {
     this.texts.push({ x, y, str, color, life: 1.5 });
+  }
+
+  /** A small fireworks show in the game's own colours — for the one
+   * moment in the story that has earned confetti: the last job, done. */
+  celebrate(x, y) {
+    this.burst(x, y, 16, '#ffd166', 190, 0.7);
+    this.burst(x, y, 12, '#06d6a0', 150, 0.6);
+    this.burst(x, y, 10, '#ef476f', 120, 0.5);
   }
 
   update(dt) {

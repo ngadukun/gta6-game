@@ -1,13 +1,14 @@
-// The screenshot scenes: ?shot=title|chase|city|mission&seed=N. A scene is
-// not a mock-up — it builds the real world from the seed and then plays the
-// real rules forward under a simple autopilot, so the frame the camera
-// takes is a frame a real session could produce, and the same seed always
-// produces the same frame.
+// shots.js — the screenshot scenes: ?shot=title|chase|city|mission&seed=N.
+//
+// A scene is not a mock-up. It builds the real world from the seed and
+// then plays the real rules forward under a simple autopilot, so the
+// frame the camera takes is a frame a real session could produce — and
+// the same seed always produces the same frame.
 import { STEP } from './config.js';
 import { laneTarget } from './vehicles.js';
 
 /** A keyboard with no human attached: the game's Input, driven by the
- * scene instead. Held keys are set wholesale, nothing is ever "tapped". */
+ * scene instead. Held keys are set wholesale; nothing is ever "tapped". */
 class StubInput {
   constructor() {
     this.down = new Set();
@@ -26,10 +27,15 @@ class StubInput {
 
   /** Hold exactly these keys from this step on. */
   set(...codes) { this.down = new Set(codes); }
+
+  /** Let go of everything — a staged scene ends with its hands off the
+   * keys, so nothing it held can leak into whatever runs next. */
+  release() { this.down = new Set(); }
 }
 
-/** Drive a car at a point with the real keys: W to go, A or D to turn, the
- * handbrake when the point is somehow behind. Returns the distance left. */
+/** Drive a car at a point with the real keys: W to go, A or D to turn,
+ * the handbrake when the point is somehow behind. Returns the distance
+ * still to go. */
 function driveToward(input, car, tx, ty) {
   const want = Math.atan2(ty - car.y, tx - car.x);
   let diff = want - car.angle;
@@ -53,10 +59,10 @@ function walkToward(input, player, tx, ty) {
   input.set(...keys);
 }
 
-/** Play the game forward `seconds` of fixed steps, letting `drive` set the
- * keys before each one. */
+/** Play the game forward `seconds` of fixed steps, letting `drive` set
+ * the keys before each one. A non-positive span plays nothing at all. */
 function stepSeconds(game, input, seconds, drive) {
-  const steps = Math.round(seconds / STEP);
+  const steps = Math.max(0, Math.round(seconds / STEP));
   for (let i = 0; i < steps; i += 1) {
     if (drive) drive(i);
     game.step(STEP, input);
@@ -75,8 +81,9 @@ export function stageShot(name, game) {
   const city = game.city;
 
   if (name === 'chase') {
-    // The cover shot. Leo is in the stolen Futo with three stars up and the
-    // SHD on his tail, mid-delivery on a downtown loop, the job on the HUD.
+    // The cover shot. Leo is in the stolen Futo with three stars up and
+    // the SHD on his tail, mid-delivery on a downtown loop, the job on
+    // the HUD.
     game.screen = 'play';
     game.startStoryAt(1);
     game.missions.startNext(game);
@@ -109,6 +116,7 @@ export function stageShot(name, game) {
       cop.speed = Math.abs(car.speed) * 0.9;
     }
     game.dialogue = null;
+    input.release();
     return 'play';
   }
 
@@ -127,8 +135,8 @@ export function stageShot(name, game) {
   }
 
   if (name === 'mission') {
-    // The Courier, mid-flight: Paco in the passenger seat, the heat already
-    // on, the marina clock running down over the beach road.
+    // The Courier, mid-flight: Paco in the passenger seat, the heat
+    // already on, the marina clock running down over the beach road.
     game.screen = 'play';
     game.startStoryAt(2);
     game.missions.startNext(game);

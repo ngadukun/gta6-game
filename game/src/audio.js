@@ -1,8 +1,10 @@
-// Every sound in Sunhaven is synthesised on the spot with WebAudio — noise
-// through a filter for the things that bang and scrape, oscillators for the
-// things that ring. No audio files, nothing to fetch. On top of the one-shot
-// recipes sit three loops: the engine under Leo's right foot, the siren that
-// means the SHD is near, and a slow radio pulse that never quite turns off.
+// audio.js — every sound in Sunhaven, synthesised on the spot.
+//
+// WebAudio throughout: noise through a filter for the things that bang
+// and scrape, oscillators for the things that ring. No audio files,
+// nothing to fetch. Under the one-shot recipes sit three loops: the
+// engine under Leo's right foot, the siren that means the SHD is near,
+// and a slow radio pulse that never quite turns off.
 
 export class GameAudio {
   constructor() {
@@ -26,7 +28,16 @@ export class GameAudio {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.5;
-      this.master.connect(this.ctx.destination);
+      // Everything plays through one gentle limiter on the way out: a
+      // crash, a shot and the radio landing on the same sample should
+      // squash, not clip.
+      const limiter = this.ctx.createDynamicsCompressor();
+      limiter.threshold.value = -18;
+      limiter.knee.value = 18;
+      limiter.ratio.value = 6;
+      limiter.attack.value = 0.004;
+      limiter.release.value = 0.18;
+      this.master.connect(limiter).connect(this.ctx.destination);
     } catch {
       this.ctx = null;   // no audio in this browser: the game goes on quietly
     }
@@ -87,7 +98,7 @@ export class GameAudio {
     notes.forEach((freq, i) => setTimeout(() => this.tone(freq, 0.22, 'triangle', 0.2), i * 110));
   }
 
-  // --- The loops -------------------------------------------------------------
+  // --- The loops ---------------------------------------------------------
 
   /** Called every frame by main: engineRatio runs 0..1 while Leo drives
    * (null on foot), sirenOn while the heat is up and officers are near. */

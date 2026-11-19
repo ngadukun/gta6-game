@@ -1,13 +1,34 @@
-// The renderer: Sunhaven from above in late-afternoon light. Grass and
-// pavement, pastel blocks under long shadows, the beach running down to a
-// foam-edged sea, then the people and the cars on top of it all. And the
-// game's full-screen faces — title, pause, busted, wasted, and the morning
-// after the big one — drawn over the living city.
+// render.js — Sunhaven from above, in late-afternoon light.
+//
+// Grass and pavement, pastel blocks under long shadows, the beach running
+// down to a foam-edged sea, then the people and the cars on top of it
+// all. And the game's full-screen faces — title, pause, busted, wasted,
+// and the morning after the big one — drawn over the living city.
 import { BLOCK, CITY_W, COLS, PITCH, ROAD_W, ROWS, WORLD_H, WORLD_W } from './config.js';
 
 const FONT = 'system-ui, -apple-system, sans-serif';
 
 export class Renderer {
+  constructor() {
+    // The vignette depends only on the canvas size, and building a
+    // radial gradient is the most expensive thing in a frame: build it
+    // once per size and keep it, rather than once per frame.
+    this.vignette = null;
+    this.vignetteKey = '';
+  }
+
+  vignetteFor(ctx, w, h) {
+    const key = `${w}x${h}`;
+    if (this.vignetteKey !== key) {
+      const grad = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.78);
+      grad.addColorStop(0, 'rgba(255, 190, 90, 0)');
+      grad.addColorStop(1, 'rgba(120, 50, 10, 0.18)');
+      this.vignette = grad;
+      this.vignetteKey = key;
+    }
+    return this.vignette;
+  }
+
   drawWorld(ctx, game, w, h) {
     const cam = game.camera;
     ctx.fillStyle = '#22707f';
@@ -19,8 +40,9 @@ export class Renderer {
     this.drawGround(ctx, game, view);
     this.drawRoads(ctx, game);
     this.drawBeacon(ctx, game);
-    // Small props are culled against the view like the buildings are: the
-    // city holds hundreds of them and the camera only ever sees a street.
+    // Small props are culled against the view like the buildings are:
+    // the city holds hundreds of them and the camera only ever sees a
+    // street or two of them at a time.
     for (const lamp of game.city.lamps) if (nearView(lamp.x, lamp.y, view, 24)) this.drawLamp(ctx, lamp);
     for (const pk of game.pickups) if (pk.active && nearView(pk.x, pk.y, view, 24)) this.drawPickup(ctx, pk);
     for (const crate of game.city.crates) if (!crate.dead && nearView(crate.x + crate.s / 2, crate.y + crate.s / 2, view, 40)) this.drawCrate(ctx, crate);
@@ -35,10 +57,7 @@ export class Renderer {
 
     // A warm vignette over the whole frame: the light in Sunhaven is
     // always about an hour from evening.
-    const grad = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.78);
-    grad.addColorStop(0, 'rgba(255, 190, 90, 0)');
-    grad.addColorStop(1, 'rgba(120, 50, 10, 0.18)');
-    ctx.fillStyle = grad;
+    ctx.fillStyle = this.vignetteFor(ctx, w, h);
     ctx.fillRect(0, 0, w, h);
   }
 
@@ -143,8 +162,8 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** The objective beacon: a column of gold light with a breathing ring at
-   * its foot, visible across half the city. It is meant to be followed. */
+  /** The objective beacon: a column of gold light with a breathing ring
+   * at its foot, visible across half the city. It is meant to be followed. */
   drawBeacon(ctx, game) {
     const obj = game.missions.objective(game);
     if (!obj || !obj.target) return;
@@ -261,8 +280,8 @@ export class Renderer {
       ctx.fillRect(-t.w / 2 - 1.6, -t.h * 0.34, 3, 4.6);
       ctx.fillRect(-t.w / 2 - 1.6, t.h * 0.34 - 4.6, 3, 4.6);
     }
-    // The armoured Pony wears its plating outside: two steel bands, a gold
-    // stripe, and rivets you could count at a red light.
+    // The armoured Pony wears its plating outside: two steel bands, a
+    // gold stripe, and rivets you could count at a red light.
     if (car.armored) {
       ctx.fillStyle = 'rgba(38, 44, 52, 0.85)';
       ctx.fillRect(-t.w * 0.3, -t.h / 2, t.w * 0.14, t.h);

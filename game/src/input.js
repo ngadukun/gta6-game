@@ -1,7 +1,9 @@
-// Hands and eyes: the keyboard and mouse, sampled by the game loop. The loop
-// asks two different questions — "is it down?" for walking and driving, and
-// "did it just go down?" for menus, doors and other one-shot acts — so this
-// class keeps a held set and a pressed-this-step set side by side.
+// input.js — hands and eyes: the keyboard and mouse, sampled by the loop.
+//
+// The loop asks two different questions — "is it down?" for walking and
+// driving, and "did it just go down?" for menus, doors and other one-shot
+// acts — so this class keeps a held set and a pressed-this-step set side
+// by side, and spends the pressed set at the end of every step.
 
 const SCROLL_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
 
@@ -27,10 +29,11 @@ export class Input {
     window.addEventListener('blur', () => {
       // Losing the window mid-hold must not leave a key — or worse, the
       // trigger — stuck down when the player comes back.
-      this.down.clear();
-      this.pressed.clear();
-      this.mouseDown = false;
-      this.mouseClicked = false;
+      this.reset();
+    });
+    window.addEventListener('visibilitychange', () => {
+      // A hidden tab is a lost window by another name: same promise.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') this.reset();
     });
     canvas.addEventListener('mousemove', (event) => {
       const box = canvas.getBoundingClientRect();
@@ -63,6 +66,16 @@ export class Input {
       x: this.mouseX - viewW / 2 + camera.x,
       y: this.mouseY - viewH / 2 + camera.y,
     };
+  }
+
+  /** Forget everything at once: held keys, fresh presses, the trigger.
+   * The window losing focus calls this, and so may the game itself —
+   * pausing with a key down should never resume with it still down. */
+  reset() {
+    this.down.clear();
+    this.pressed.clear();
+    this.mouseDown = false;
+    this.mouseClicked = false;
   }
 
   /** Close the step: edges are spent, held keys carry over. */

@@ -4,7 +4,9 @@ out/
 
 # Editor and OS litter.
 .DS_Store
+Thumbs.db
 *.swp
+*.log
 
 # The game has no dependencies; this is here so a stray tool install
 # never wanders into a commit.

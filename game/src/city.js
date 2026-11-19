@@ -1,11 +1,14 @@
-// Sunhaven itself: the road grid, the blocks and what stands on them, the
-// beach and the waterline, and the named places the story keeps returning
-// to. One seeded build is shared by physics, traffic, the renderer and the
-// minimap, so they can never disagree about where a wall is.
-import { BLOCK, CITY_W, COLS, PITCH, ROAD_W, ROWS, WORLD_H, WORLD_W } from './config.js';
+// city.js — Sunhaven's ground truth.
+//
+// The road grid, the blocks and what stands on them, the beach, the
+// waterline, and the named places the story keeps sending Leo back to.
+// One seeded build is shared by physics, traffic, the renderer and the
+// minimap, so no two parts of the game can disagree about where a wall is.
+import { BLOCK, CITY_W, COLS, DISTRICT_NAMES, PITCH, ROAD_W, ROWS, WORLD_H, WORLD_W } from './config.js';
 
-// Roof and wall paints, by district: downtown glassy and pale, the suburbs
-// loud, the beachfront bleached, the docks the colour of old rope and rust.
+// Roof and wall paints, dealt by district: downtown pale and glassy, the
+// suburbs cheerful, the beachfront bleached by salt air, the docks the
+// colours of tar, rope and rust.
 const ROOF_PAINTS = {
   downtown: ['#e8e3d8', '#d9dee2', '#e6d7c3', '#cfd8dc', '#efe6da'],
   suburb: ['#f2c14e', '#ef8354', '#f4f1de', '#e07a5f', '#81b29a', '#f2cc8f'],
@@ -19,9 +22,9 @@ const WALL_PAINTS = {
   docks: ['#6c5849', '#5e503f', '#746855'],
 };
 
-/** Which district a block belongs to. The south-east corner is the docks,
- * the easternmost column faces the beach, the middle is downtown, and
- * everything else is the suburbs. */
+/** Which district owns a block. The south-east corner is the docks, the
+ * easternmost column fronts the beach, the middle blocks are downtown,
+ * and everything else is the suburbs. */
 export function districtOf(col, row) {
   if (row === ROWS - 1 && col >= 6) return 'docks';
   if (col === COLS - 1) return 'beach';
@@ -29,10 +32,14 @@ export function districtOf(col, row) {
   return 'suburb';
 }
 
-/** Centre lines of the roads: vertical road c runs at x, horizontal road r at y. */
+/** Centre lines: vertical road c runs at this x, horizontal road r at this y. */
 export function roadCenterX(c) { return c * PITCH + ROAD_W / 2; }
 export function roadCenterY(r) { return r * PITCH + ROAD_W / 2; }
 
+/**
+ * Build the whole city from the stream. The order of the draws below IS
+ * the city: rearrange a single one and seed 7 grows a different town.
+ */
 export function buildCity(rng) {
   const buildings = [];
   const palms = [];
@@ -47,14 +54,14 @@ export function buildCity(rng) {
       const by = row * PITCH + ROAD_W;
       const roll = rng.next();
 
-      // One block in twelve stays a park: grass and palms, nothing to hit.
+      // One block in twelve is left a park: grass, palms, nothing to hit.
       if (roll < 0.08) {
         for (let i = 0; i < 7; i += 1) {
           palms.push({ x: bx + rng.range(24, BLOCK - 24), y: by + rng.range(24, BLOCK - 24), park: true });
         }
         continue;
       }
-      // A few more are parking lots — where the stealable cars wait.
+      // A few more are parking lots — home of the borrowable cars.
       if (roll < 0.2) {
         for (let sx = 0; sx < 3; sx += 1) {
           for (let sy = 0; sy < 2; sy += 1) {
@@ -81,7 +88,7 @@ export function buildCity(rng) {
           }
         }
       } else if (district === 'docks') {
-        // One long warehouse per block, crates stacked in the yard behind it.
+        // One long warehouse per block, and crates stacked in its yard.
         const height = rng.range(20, 30);
         const wall = rng.pick(WALL_PAINTS.docks);
         const roof = rng.pick(ROOF_PAINTS.docks);
@@ -90,7 +97,7 @@ export function buildCity(rng) {
           crates.push({ x: bx + rng.range(20, BLOCK - 44), y: by + rng.range(190, BLOCK - 44), s: rng.range(22, 34) });
         }
       } else {
-        // Houses and small shops, four to a block with gardens between.
+        // Houses and small shops: four to a block, gardens between.
         for (let sx = 0; sx < 2; sx += 1) {
           for (let sy = 0; sy < 2; sy += 1) {
             const w = inner / 2 - 16;
@@ -111,13 +118,13 @@ export function buildCity(rng) {
     }
   }
 
-  // A line of palms along the promenade, where the pavement meets the sand.
+  // A line of palms along the promenade, where pavement meets sand.
   for (let y = 60; y < WORLD_H - 40; y += 92) {
     palms.push({ x: CITY_W + 26, y: y + rng.range(-8, 8) });
   }
 
-  // Street lamps down the avenues, alternating sides the way a council with
-  // a spreadsheet would place them.
+  // Street lamps down every avenue, alternating sides the way a council
+  // with a spreadsheet would place them.
   for (let c = 0; c <= COLS; c += 1) {
     for (let y = 120; y < WORLD_H - 60; y += 230) {
       const side = Math.floor(y / 230) % 2 === 0 ? -ROAD_W / 2 + 7 : ROAD_W / 2 - 7;
@@ -125,8 +132,8 @@ export function buildCity(rng) {
     }
   }
 
-  // The named places: each one a point on open ground beside its building,
-  // addressed the way the story addresses them.
+  // The named places. Each is a point on open ground beside its building,
+  // addressed the way the story addresses it: from the road to its south.
   const southRoadOf = (col, row) => ({ x: col * PITCH + ROAD_W + BLOCK / 2, y: row * PITCH + ROAD_W + BLOCK + ROAD_W / 2 });
   const places = {
     chopShop: { x: roadCenterX(1), y: southRoadOf(1, 5).y, name: 'Vega Auto Works' },
@@ -147,12 +154,11 @@ export function buildCity(rng) {
   };
 }
 
-const DISTRICT_TITLES = {
-  downtown: 'Downtown Sunhaven',
-  suburb: 'Palma Heights',
-  beach: 'Coral Beachfront',
-  docks: 'The Docks',
-};
+/** The index of the intersection nearest to a world coordinate along
+ * one axis, clamped to the grid: 0..max. The police navigate by it. */
+export function nearestIntersection(value, max) {
+  return Math.max(0, Math.min(max, Math.round(value / PITCH)));
+}
 
 /** The block a world point falls in, clamped to the grid: {col, row}. */
 export function blockAt(x, y) {
@@ -162,17 +168,17 @@ export function blockAt(x, y) {
   };
 }
 
-/** The district a world point stands in. Anything past the last road —
- * sand, boardwalk, open water — counts as the beachfront. */
+/** The district a world point stands in. Anything east of the last road —
+ * sand, boardwalk, open water — is the beachfront's business. */
 export function districtNameAt(city, x, y) {
-  if (x >= CITY_W) return DISTRICT_TITLES.beach;
+  if (x >= CITY_W) return DISTRICT_NAMES.beach;
   const { col, row } = blockAt(x, y);
-  return DISTRICT_TITLES[districtOf(col, row)];
+  return DISTRICT_NAMES[districtOf(col, row)];
 }
 
-/** Push a circle out of every building it overlaps, and hand back where it
- * ended up. A circle whose centre is inside a building leaves by the
- * nearest face; any other overlap slides out along the push direction. */
+/** Push a circle out of every building it overlaps and hand back where it
+ * ended up. A centre already inside a building leaves by the nearest face;
+ * any other overlap slides out along the line to the nearest point. */
 export function collideCircle(city, x, y, r) {
   for (const b of city.buildings) {
     const nx = Math.max(b.x, Math.min(x, b.x + b.w));
@@ -200,7 +206,7 @@ export function collideCircle(city, x, y, r) {
   return { x, y };
 }
 
-/** Keep a point inside the world, and out of the sea: the shore is as far
+/** Keep a point inside the world and out of the sea: the shore is as far
  * east as anything on legs or wheels is allowed to go. */
 export function clampToWorld(city, x, y, r) {
   return {

@@ -1,13 +1,15 @@
-// Cars. Eight types a civilian can own (and Leo can borrow), one type only
-// the SHD drives, and a single arcade physics step that all of them share —
-// the player's car, the traffic and the Interceptors differ only in who or
-// what is choosing the controls.
-import { COLS, ROAD_W, ROWS } from './config.js';
+// vehicles.js — everything on wheels.
+//
+// Eight civilian types Leo can borrow, one type only the SHD drives, and a
+// single arcade physics step they all share. The player's car, the traffic
+// and the Interceptors run the same numbers; only the hands on the wheel
+// differ — keys, a lane-following routine, or a pursuit.
+import { COLS, ROAD_W, ROWS, wrapAngle } from './config.js';
 import { collideCircle, roadCenterX, roadCenterY } from './city.js';
 
-// w/h are the body's footprint in pixels; accel and top are px/s² and px/s;
-// grip is how hard the tyres kill sideways slide; value is what Marisol's
-// ledger says the car is worth.
+// w/h: the body's footprint in pixels. accel/top: px/s² and px/s. grip:
+// how hard the tyres kill sideways slide. value: what Marisol's ledger
+// says the car is worth on her lot.
 export const CAR_TYPES = [
   { id: 'compact', name: 'Blista Compact', w: 36, h: 19, accel: 210, top: 265, grip: 9, value: 120 },
   { id: 'sedan', name: 'Primo Sedan', w: 42, h: 20, accel: 200, top: 300, grip: 9, value: 200 },
@@ -33,12 +35,12 @@ export function makeCar(type, x, y, angle, color) {
 }
 
 /**
- * Move one car one step under control {throttle -1..1, steer -1..1, brake,
- * handbrake}. The velocity is kept in forward/lateral parts: the engine
- * works on the forward part, the tyres bleed the lateral part away (slower
- * with the handbrake up — that is what a drift is), and steering only bites
- * once the car is actually rolling. Returns the impact speed when the car
- * hit a building this step, else 0.
+ * Move one car one step under control {throttle −1..1, steer −1..1, brake,
+ * handbrake}. Velocity is carried in forward/lateral parts: the engine
+ * works the forward part, the tyres bleed the lateral part away (slower
+ * with the handbrake up — that difference is what a drift is), and the
+ * steering only bites once the car is actually rolling. Returns the impact
+ * speed if the car met a building this step, else 0.
  */
 export function stepCarPhysics(car, control, dt, city) {
   const t = car.type;
@@ -55,7 +57,8 @@ export function stepCarPhysics(car, control, dt, city) {
   } else {
     fwd += control.throttle * t.accel * dt;
   }
-  // Reverse is its own gear: weaker, and capped well below forward speed.
+  // Reverse is its own gear: weaker off the line, capped well below
+  // forward speed, and reached only once the car has nearly stopped.
   if (control.throttle < 0 && fwd <= 10) {
     fwd = Math.max(fwd + control.throttle * t.accel * 0.6 * dt, -t.top * 0.35);
   }
@@ -69,16 +72,16 @@ export function stepCarPhysics(car, control, dt, city) {
   car.vx = nfx * fwd - nfy * lat;
   car.vy = nfy * fwd + nfx * lat;
   car.speed = fwd;
-  // Brake lights belong to the physics, not the driver: any car standing
-  // on the pedal — Leo included — shows them. (Traffic and the police set
-  // their own after this call, from the same control, so nothing changes
-  // for them; Leo's simply start working.)
+  // Brake lights are physics, not preference: any car standing on the
+  // pedal shows them, Leo's included. Traffic and the police set their
+  // own after this call from the same control, so nothing changes for
+  // them; the player's simply work.
   car.brakeLight = !!(control.brake || control.handbrake);
   car.x += car.vx * dt;
   car.y += car.vy * dt;
 
-  // Buildings are tested at two probes, nose and tail, so a long car can
-  // clip a corner with either end. A hard enough meeting costs health.
+  // Buildings are probed at nose and tail, so a long car can clip a
+  // corner with either end. A hard enough meeting costs health.
   let impact = 0;
   for (const s of [-0.32, 0.32]) {
     const px = car.x + nfx * t.w * s;
@@ -111,7 +114,7 @@ export function stepCarPhysics(car, control, dt, city) {
 }
 
 /** Settle every overlap between cars with an impulse along the contact
- * normal, split by mass. A fast car shoves a slow one aside instead of
+ * normal, split by mass: a fast car shoves a slow one aside instead of
  * stopping dead against it, and heavy metal — Interceptors, the armoured
  * Pony — barely notices being knocked. Hard meetings cost both cars. */
 export function collideCars(cars) {
@@ -152,25 +155,26 @@ export function collideCars(cars) {
   }
 }
 
-// Traffic. Every civilian car is driving to an intersection; when it gets
-// there it picks the next one, mostly straight on, and drives to that.
-// Right-hand traffic: the lane a car belongs in sits a quarter-road to the
-// right of the centre line for its heading.
+// --- Traffic ------------------------------------------------------------------
+// Every civilian car is driving to an intersection; on arrival it chooses
+// the next one — mostly straight on — and drives there. Right-hand
+// traffic: a car's lane sits a quarter-road to the right of the centre
+// line for its heading.
 const LANE = ROAD_W / 4;
 
 export class TrafficCar {
   constructor(car, ci, ri) {
     this.car = car;
-    this.ci = ci;   // the intersection column it is heading for
-    this.ri = ri;   // the intersection row
+    this.ci = ci;   // intersection column it is heading for
+    this.ri = ri;   // intersection row
     this.dirX = 1;
     this.dirY = 0;
     this.cruise = car.type.top * 0.42;
   }
 }
 
-/** The point inside intersection (ci, ri) that a car with this heading
- * should aim at, given which side of the road it drives on. */
+/** The point inside intersection (ci, ri) a car with this heading should
+ * aim at, given the side of the road it drives on. */
 export function laneTarget(ci, ri, dirX, dirY) {
   const cx = roadCenterX(ci);
   const cy = roadCenterY(ri);
@@ -186,8 +190,8 @@ export function stepTraffic(driver, dt, city, cars, rng) {
   const goal = laneTarget(driver.ci, driver.ri, driver.dirX, driver.dirY);
   if (Math.hypot(goal.x - car.x, goal.y - car.y) < 42) {
     // Arrived: choose the next intersection. Mostly straight on, never a
-    // U-turn while a turn exists, and the choice comes off the game stream
-    // so a replayed world makes the same turns.
+    // U-turn while any turn exists — and the choice comes off the game
+    // stream, so a replayed world makes the same turns.
     const options = [];
     if (driver.ci < COLS) options.push([1, 0]);
     if (driver.ci > 0) options.push([-1, 0]);
@@ -206,18 +210,16 @@ export function stepTraffic(driver, dt, city, cars, rng) {
     driver.ri += next[1];
   }
 
-  // Steer at a look-ahead point: aiming at where the nose will be, not at
-  // where the car is, is what keeps the lane-keeping calm.
+  // Steer at a look-ahead point: aiming where the nose will be, rather
+  // than where the car is, is what keeps the lane-keeping calm.
   const look = laneTarget(driver.ci, driver.ri, driver.dirX, driver.dirY);
   const aheadX = car.x + Math.cos(car.angle) * 30;
   const aheadY = car.y + Math.sin(car.angle) * 30;
   const want = Math.atan2(look.y - aheadY, look.x - aheadX);
-  let diff = want - car.angle;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
+  const diff = wrapAngle(want - car.angle);
   const steer = Math.max(-1, Math.min(1, diff * 2.2));
 
-  // Whoever is ahead sets the pace: slow for them, stop close behind them.
+  // Whoever is ahead sets the pace: slow for them, stop close behind.
   let throttle = car.speed < driver.cruise ? 0.75 : 0;
   let brake = false;
   let blocked = false;
@@ -236,12 +238,15 @@ export function stepTraffic(driver, dt, city, cars, rng) {
       break;
     }
   }
-  // Stuck behind someone long enough, a Sunhaven driver leans on the horn.
-  // The flag is raised here; main plays it when the player is near enough
-  // to hear, and clears it either way.
+  // Stuck behind someone long enough, a Sunhaven driver leans on the
+  // horn — some sooner than others; patience is dealt by car, off its id,
+  // so a replayed world honks at the same moments. The flag is raised
+  // here; main plays it when the player is near enough to hear, and
+  // clears it either way.
   if (blocked) {
     driver.blockedT = (driver.blockedT ?? 0) + dt;
-    if (driver.blockedT > 1.4) car.honk = true;
+    const patience = 1.1 + (car.id % 5) * 0.15;
+    if (driver.blockedT > patience) car.honk = true;
   } else {
     driver.blockedT = 0;
   }
